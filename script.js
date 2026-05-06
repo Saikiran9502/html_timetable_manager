@@ -10,7 +10,15 @@
             fileType: 'excel',
             excelFormat: 'legacy',
             overlapCheckInProgress: false,
-            teacherSubjectMap: {}
+            teacherSubjectMap: {},
+            teachers: [],
+            teacherMappings: [],
+            config: {
+                schoolDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+                periodsPerDay: 8,
+                periodsPerTeacher: 30,
+                aiPromptStyle: 'compact'
+            }
         };
         
         // Sample data for demonstration
@@ -44,6 +52,9 @@
             const storedHolidays = localStorage.getItem('schoolHolidays');
             const storedPeriodTimes = localStorage.getItem('periodTimes');
             const storedTeacherSubjectMap = localStorage.getItem('teacherSubjectMap');
+            const storedTeachers = localStorage.getItem('teacherMasterList');
+            const storedTeacherMappings = localStorage.getItem('teacherGradeSubjectMappings');
+            const storedConfig = localStorage.getItem('timetableConfig');
             
             if (storedTimetable) {
                 state.timetableData = JSON.parse(storedTimetable);
@@ -63,6 +74,21 @@
             
             if (storedTeacherSubjectMap) {
                 state.teacherSubjectMap = JSON.parse(storedTeacherSubjectMap);
+            }
+
+            if (storedTeachers) {
+                state.teachers = JSON.parse(storedTeachers);
+            }
+
+            if (storedTeacherMappings) {
+                state.teacherMappings = JSON.parse(storedTeacherMappings);
+            }
+
+            if (storedConfig) {
+                state.config = {
+                    ...state.config,
+                    ...JSON.parse(storedConfig)
+                };
             }
         }
         
@@ -85,6 +111,12 @@
         
         function saveTeacherSubjectMapToStorage() {
             localStorage.setItem('teacherSubjectMap', JSON.stringify(state.teacherSubjectMap || {}));
+        }
+
+        function saveMasterDataToStorage() {
+            localStorage.setItem('teacherMasterList', JSON.stringify(state.teachers || []));
+            localStorage.setItem('teacherGradeSubjectMappings', JSON.stringify(state.teacherMappings || []));
+            localStorage.setItem('timetableConfig', JSON.stringify(state.config || {}));
         }
         
         // Set up tab navigation
@@ -112,6 +144,25 @@
             // Dashboard button
             document.getElementById('dashboardBtn').addEventListener('click', function() {
                 alert("Redirecting to Dashboard...");
+            });
+
+            // Local setup and AI prompt
+            document.getElementById('teacherListFileInput').addEventListener('change', handleTeacherListUpload);
+            document.getElementById('teacherMappingFileInput').addEventListener('change', handleTeacherMappingUpload);
+            document.getElementById('addTeacherRowBtn').addEventListener('click', addTeacherRow);
+            document.getElementById('addMappingRowBtn').addEventListener('click', addMappingRow);
+            document.getElementById('saveMasterDataBtn').addEventListener('click', saveMasterDataFromTables);
+            document.getElementById('downloadDataTemplatesBtn').addEventListener('click', downloadMasterDataTemplates);
+            document.getElementById('generatePromptBtn').addEventListener('click', renderAIPrompt);
+            document.getElementById('copyPromptBtn').addEventListener('click', copyAIPrompt);
+            document.getElementById('downloadPromptBtn').addEventListener('click', downloadAIPrompt);
+            ['schoolDaysInput', 'periodsPerDayInput', 'periodsPerTeacherInput', 'aiPromptStyleInput'].forEach(id => {
+                document.getElementById(id).addEventListener('change', function() {
+                    syncConfigFromInputs();
+                    saveMasterDataToStorage();
+                    updateSetupSummary();
+                    renderAIPrompt();
+                });
             });
             
             // Holiday management
@@ -199,6 +250,11 @@
         
         // Initialize the UI
         function initUI() {
+            syncConfigInputs();
+            renderTeacherMasterTable();
+            renderTeacherMappingTable();
+            updateSetupSummary();
+            renderAIPrompt();
             renderHolidays();
             
             // If timetable data exists, show it
@@ -210,6 +266,420 @@
                 updateTimetableSummary();
                 renderTimetable();
             }
+        }
+
+        function syncConfigInputs() {
+            document.getElementById('schoolDaysInput').value = (state.config.schoolDays || []).join(',');
+            document.getElementById('periodsPerDayInput').value = state.config.periodsPerDay || 8;
+            document.getElementById('periodsPerTeacherInput').value = state.config.periodsPerTeacher || 30;
+            document.getElementById('aiPromptStyleInput').value = state.config.aiPromptStyle || 'compact';
+        }
+
+        function syncConfigFromInputs() {
+            const days = document.getElementById('schoolDaysInput').value
+                .split(',')
+                .map(day => toCleanString(day))
+                .filter(Boolean);
+            state.config.schoolDays = days.length > 0 ? days : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            state.config.periodsPerDay = Math.max(1, Number(document.getElementById('periodsPerDayInput').value) || 8);
+            state.config.periodsPerTeacher = Math.max(1, Number(document.getElementById('periodsPerTeacherInput').value) || 30);
+            state.config.aiPromptStyle = document.getElementById('aiPromptStyleInput').value || 'compact';
+        }
+
+        function updateSetupSummary() {
+            document.getElementById('masterTeachersCount').textContent = (state.teachers || []).length;
+            document.getElementById('masterMappingsCount').textContent = (state.teacherMappings || []).length;
+            document.getElementById('configDaysCount').textContent = (state.config.schoolDays || []).length;
+            document.getElementById('configPeriodsCount').textContent = state.config.periodsPerDay || 0;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function parseCSVRows(csvData) {
+            return csvData
+                .split(/\r?\n/)
+                .filter(line => line.trim() !== '')
+                .map(line => parseCSVLine(line).map(cell => toCleanString(cell)));
+        }
+
+        function findHeaderIndex(headers, names) {
+            return headers.findIndex(header => names.includes(toCleanString(header).toLowerCase()));
+        }
+
+        function handleTeacherListUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const rows = parseCSVRows(e.target.result);
+                if (rows.length < 2) {
+                    alert("Teacher CSV is empty or invalid.");
+                    return;
+                }
+
+                const headers = rows[0].map(header => toCleanString(header).toLowerCase());
+                const idIndex = findHeaderIndex(headers, ['teacher id', 'teacherid', 'id']);
+                const nameIndex = findHeaderIndex(headers, ['teacher name', 'teachername', 'name']);
+                const subjectsIndex = findHeaderIndex(headers, ['subjects', 'subject']);
+                const phoneIndex = findHeaderIndex(headers, ['phone', 'mobile']);
+                const emailIndex = findHeaderIndex(headers, ['email']);
+
+                if (nameIndex === -1) {
+                    alert("Teacher CSV must include Teacher Name column.");
+                    return;
+                }
+
+                const imported = rows.slice(1)
+                    .map((cells, index) => ({
+                        id: toCleanString(cells[idIndex]) || `T${String((state.teachers || []).length + index + 1).padStart(4, '0')}`,
+                        name: toCleanString(cells[nameIndex]),
+                        subjects: subjectsIndex >= 0 ? toCleanString(cells[subjectsIndex]) : '',
+                        phone: phoneIndex >= 0 ? toCleanString(cells[phoneIndex]) : '',
+                        email: emailIndex >= 0 ? toCleanString(cells[emailIndex]) : ''
+                    }))
+                    .filter(row => row.name);
+
+                state.teachers = mergeTeachers(state.teachers || [], imported);
+                rebuildTeacherSubjectMapFromMasterData();
+                saveMasterDataToStorage();
+                saveTeacherSubjectMapToStorage();
+                renderTeacherMasterTable();
+                renderTeacherMappingTable();
+                updateSetupSummary();
+                updateClassFilters();
+                renderAIPrompt();
+            };
+            reader.readAsText(file);
+        }
+
+        function handleTeacherMappingUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const rows = parseCSVRows(e.target.result);
+                if (rows.length < 2) {
+                    alert("Mapping CSV is empty or invalid.");
+                    return;
+                }
+
+                const headers = rows[0].map(header => toCleanString(header).toLowerCase());
+                const teacherIdIndex = findHeaderIndex(headers, ['teacher id', 'teacherid', 'id']);
+                const teacherNameIndex = findHeaderIndex(headers, ['teacher name', 'teachername', 'name']);
+                const gradeIndex = findHeaderIndex(headers, ['grade-section', 'class-section', 'class', 'grade section']);
+                const subjectIndex = findHeaderIndex(headers, ['subject']);
+                const periodsIndex = findHeaderIndex(headers, ['periods per week', 'periodsperweek', 'periods', 'weekly periods']);
+
+                if (gradeIndex === -1 || subjectIndex === -1) {
+                    alert("Mapping CSV must include Grade-Section and Subject columns.");
+                    return;
+                }
+
+                const imported = rows.slice(1)
+                    .map((cells, index) => {
+                        const teacherId = teacherIdIndex >= 0 ? toCleanString(cells[teacherIdIndex]) : '';
+                        const teacherName = teacherNameIndex >= 0 ? toCleanString(cells[teacherNameIndex]) : findTeacherNameById(teacherId);
+                        return {
+                            id: `M${Date.now()}-${index}`,
+                            teacherId,
+                            teacherName,
+                            gradeSection: normalizeClassSectionLabel(cells[gradeIndex]),
+                            subject: toCleanString(cells[subjectIndex]),
+                            periodsPerWeek: periodsIndex >= 0 ? toCleanString(cells[periodsIndex]) : ''
+                        };
+                    })
+                    .filter(row => row.gradeSection && row.subject && (row.teacherId || row.teacherName));
+
+                state.teacherMappings = mergeTeacherMappings(state.teacherMappings || [], imported);
+                rebuildTeacherSubjectMapFromMasterData();
+                saveMasterDataToStorage();
+                saveTeacherSubjectMapToStorage();
+                renderTeacherMappingTable();
+                updateSetupSummary();
+                updateClassFilters();
+                renderAIPrompt();
+            };
+            reader.readAsText(file);
+        }
+
+        function mergeTeachers(existing, imported) {
+            const map = new Map();
+            existing.concat(imported).forEach(teacher => {
+                const key = toCleanString(teacher.id).toLowerCase() || toCleanString(teacher.name).toLowerCase();
+                if (!key) return;
+                map.set(key, { ...(map.get(key) || {}), ...teacher });
+            });
+            return Array.from(map.values()).sort((a, b) => safeLocaleCompare(a.name, b.name));
+        }
+
+        function mergeTeacherMappings(existing, imported) {
+            const map = new Map();
+            existing.concat(imported).forEach(mapping => {
+                const key = [
+                    toCleanString(mapping.teacherId).toLowerCase(),
+                    toCleanString(mapping.teacherName).toLowerCase(),
+                    toCleanString(mapping.gradeSection).toLowerCase(),
+                    toCleanString(mapping.subject).toLowerCase()
+                ].join('|');
+                if (!key.replace(/\|/g, '')) return;
+                map.set(key, { ...(map.get(key) || {}), ...mapping, id: mapping.id || key });
+            });
+            return Array.from(map.values()).sort((a, b) =>
+                safeLocaleCompare(a.gradeSection, b.gradeSection) || safeLocaleCompare(a.teacherName, b.teacherName)
+            );
+        }
+
+        function findTeacherNameById(teacherId) {
+            const teacher = (state.teachers || []).find(item => toCleanString(item.id).toLowerCase() === toCleanString(teacherId).toLowerCase());
+            return teacher ? teacher.name : '';
+        }
+
+        function renderTeacherMasterTable() {
+            const table = document.getElementById('teacherMasterTable');
+            const rows = state.teachers || [];
+            table.innerHTML = `
+                <thead>
+                    <tr><th>Teacher ID</th><th>Teacher Name</th><th>Subjects</th><th>Phone</th><th>Email</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                    ${rows.map((teacher, index) => `
+                        <tr data-index="${index}">
+                            <td><input value="${escapeHtml(teacher.id)}" data-field="id"></td>
+                            <td><input value="${escapeHtml(teacher.name)}" data-field="name"></td>
+                            <td><input value="${escapeHtml(teacher.subjects)}" data-field="subjects"></td>
+                            <td><input value="${escapeHtml(teacher.phone)}" data-field="phone"></td>
+                            <td><input value="${escapeHtml(teacher.email)}" data-field="email"></td>
+                            <td><button class="btn btn-danger btn-sm" onclick="deleteTeacherRow(${index})"><i class="fas fa-trash"></i></button></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+        }
+
+        function renderTeacherMappingTable() {
+            const table = document.getElementById('teacherMappingTable');
+            const rows = state.teacherMappings || [];
+            table.innerHTML = `
+                <thead>
+                    <tr><th>Teacher ID</th><th>Teacher Name</th><th>Grade-Section</th><th>Subject</th><th>Periods / Week</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                    ${rows.map((mapping, index) => `
+                        <tr data-index="${index}">
+                            <td><input value="${escapeHtml(mapping.teacherId)}" data-field="teacherId"></td>
+                            <td><input value="${escapeHtml(mapping.teacherName)}" data-field="teacherName"></td>
+                            <td><input value="${escapeHtml(mapping.gradeSection)}" data-field="gradeSection"></td>
+                            <td><input value="${escapeHtml(mapping.subject)}" data-field="subject"></td>
+                            <td><input type="number" min="0" value="${escapeHtml(mapping.periodsPerWeek)}" data-field="periodsPerWeek"></td>
+                            <td><button class="btn btn-danger btn-sm" onclick="deleteMappingRow(${index})"><i class="fas fa-trash"></i></button></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+        }
+
+        function readTableRows(tableId, fields) {
+            return Array.from(document.querySelectorAll(`#${tableId} tbody tr`)).map(row => {
+                const item = {};
+                fields.forEach(field => {
+                    const input = row.querySelector(`[data-field="${field}"]`);
+                    item[field] = input ? toCleanString(input.value) : '';
+                });
+                return item;
+            });
+        }
+
+        function saveMasterDataFromTables() {
+            syncConfigFromInputs();
+            state.teachers = readTableRows('teacherMasterTable', ['id', 'name', 'subjects', 'phone', 'email'])
+                .filter(teacher => teacher.name);
+            state.teacherMappings = readTableRows('teacherMappingTable', ['teacherId', 'teacherName', 'gradeSection', 'subject', 'periodsPerWeek'])
+                .map((mapping, index) => ({
+                    ...mapping,
+                    id: `M${index + 1}`,
+                    teacherName: mapping.teacherName || findTeacherNameById(mapping.teacherId),
+                    gradeSection: normalizeClassSectionLabel(mapping.gradeSection)
+                }))
+                .filter(mapping => mapping.gradeSection && mapping.subject && (mapping.teacherId || mapping.teacherName));
+
+            rebuildTeacherSubjectMapFromMasterData();
+            saveMasterDataToStorage();
+            saveTeacherSubjectMapToStorage();
+            const updatedPeriods = autoFillMissingSubjectsFromTeacherMap();
+            if (updatedPeriods > 0) saveTimetableToStorage();
+            renderTeacherMasterTable();
+            renderTeacherMappingTable();
+            updateSetupSummary();
+            updateClassFilters();
+            renderAIPrompt();
+            alert("Local setup data saved.");
+        }
+
+        function addTeacherRow() {
+            saveMasterDataFromTablesWithoutAlert();
+            state.teachers.push({ id: '', name: '', subjects: '', phone: '', email: '' });
+            renderTeacherMasterTable();
+            updateSetupSummary();
+        }
+
+        function addMappingRow() {
+            saveMasterDataFromTablesWithoutAlert();
+            state.teacherMappings.push({ id: '', teacherId: '', teacherName: '', gradeSection: '', subject: '', periodsPerWeek: '' });
+            renderTeacherMappingTable();
+            updateSetupSummary();
+        }
+
+        function saveMasterDataFromTablesWithoutAlert() {
+            syncConfigFromInputs();
+            state.teachers = readTableRows('teacherMasterTable', ['id', 'name', 'subjects', 'phone', 'email']);
+            state.teacherMappings = readTableRows('teacherMappingTable', ['teacherId', 'teacherName', 'gradeSection', 'subject', 'periodsPerWeek']);
+        }
+
+        function deleteTeacherRow(index) {
+            saveMasterDataFromTablesWithoutAlert();
+            state.teachers.splice(index, 1);
+            rebuildTeacherSubjectMapFromMasterData();
+            saveMasterDataToStorage();
+            saveTeacherSubjectMapToStorage();
+            renderTeacherMasterTable();
+            updateSetupSummary();
+            renderAIPrompt();
+        }
+
+        function deleteMappingRow(index) {
+            saveMasterDataFromTablesWithoutAlert();
+            state.teacherMappings.splice(index, 1);
+            rebuildTeacherSubjectMapFromMasterData();
+            saveMasterDataToStorage();
+            saveTeacherSubjectMapToStorage();
+            renderTeacherMappingTable();
+            updateSetupSummary();
+            renderAIPrompt();
+        }
+
+        function rebuildTeacherSubjectMapFromMasterData() {
+            const nextMap = { ...(state.teacherSubjectMap || {}) };
+
+            (state.teachers || []).forEach(teacher => {
+                const subject = toCleanString(teacher.subjects).split(/[;/,]/).map(item => toCleanString(item)).filter(Boolean)[0] || '';
+                if (!subject) return;
+                const byId = buildTeacherSubjectMapKey('', teacher.id);
+                const byName = buildTeacherSubjectMapKey(teacher.name, '');
+                if (byId) nextMap[byId] = subject;
+                if (byName) nextMap[byName] = subject;
+            });
+
+            (state.teacherMappings || []).forEach(mapping => {
+                if (!mapping.subject) return;
+                const byId = buildTeacherSubjectMapKey('', mapping.teacherId);
+                const byName = buildTeacherSubjectMapKey(mapping.teacherName, '');
+                if (byId) nextMap[byId] = mapping.subject;
+                if (byName) nextMap[byName] = mapping.subject;
+            });
+
+            state.teacherSubjectMap = nextMap;
+        }
+
+        function makePeriodHeaders() {
+            return Array.from({ length: state.config.periodsPerDay || 8 }, (_, index) => `P${index + 1}`);
+        }
+
+        function buildAIPrompt() {
+            syncConfigFromInputs();
+            const days = state.config.schoolDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            const periodHeaders = makePeriodHeaders();
+            const teachers = state.teachers || [];
+            const mappings = state.teacherMappings || [];
+            const compactMappings = mappings.map(row =>
+                `${row.gradeSection} | ${row.subject} | ${row.teacherId || '-'} | ${row.teacherName || '-'} | ${row.periodsPerWeek || 'as needed'}`
+            );
+
+            const detailedData = state.config.aiPromptStyle === 'detailed'
+                ? `\nTeacher CSV:\n${toTeacherCSV(teachers)}\n\nMapping CSV:\n${toMappingCSV(mappings)}\n`
+                : `\nMappings:\n${compactMappings.join('\n') || 'No mappings imported yet.'}\n`;
+
+            return `You are generating a school timetable from local principal-provided data.
+
+Config:
+- Days: ${days.join(', ')}
+- Periods per day: ${state.config.periodsPerDay}
+- Max periods per teacher per week: ${state.config.periodsPerTeacher}
+- Output columns: Class-Section,Day,${periodHeaders.join(',')}
+- Period cell format: TeacherID:TeacherName:Subject
+- Use an empty cell for free/break periods.
+
+Hard constraints:
+- Use only teachers and class-subject mappings listed below.
+- A teacher cannot be assigned to two classes in the same Day and Period.
+- Keep each teacher at or below the configured max periods per week.
+- Fill every listed class-section for every configured day.
+- Respect Periods Per Week from mapping rows when provided.
+- Return only CSV text, with no explanation before or after.
+
+${detailedData}
+Return CSV now.`;
+        }
+
+        function toTeacherCSV(teachers) {
+            let csv = 'Teacher ID,Teacher Name,Subjects,Phone,Email\n';
+            teachers.forEach(teacher => {
+                csv += [teacher.id, teacher.name, teacher.subjects, teacher.phone, teacher.email].map(escapeCSVField).join(',') + '\n';
+            });
+            return csv.trim();
+        }
+
+        function toMappingCSV(mappings) {
+            let csv = 'Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week\n';
+            mappings.forEach(mapping => {
+                csv += [mapping.teacherId, mapping.teacherName, mapping.gradeSection, mapping.subject, mapping.periodsPerWeek].map(escapeCSVField).join(',') + '\n';
+            });
+            return csv.trim();
+        }
+
+        function renderAIPrompt() {
+            const output = document.getElementById('aiPromptOutput');
+            if (output) output.value = buildAIPrompt();
+        }
+
+        function copyAIPrompt() {
+            const output = document.getElementById('aiPromptOutput');
+            output.select();
+            document.execCommand('copy');
+        }
+
+        function downloadAIPrompt() {
+            const blob = new Blob([buildAIPrompt()], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ai_timetable_prompt.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadMasterDataTemplates() {
+            const teachersCsv = 'Teacher ID,Teacher Name,Subjects,Phone,Email\nT001,Indira,"Maths; English",,\nT002,Sai Priya,EVS,,\n';
+            const mappingsCsv = 'Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week\nT001,Indira,Grade-I-A,Maths,5\nT002,Sai Priya,Grade-I-A,EVS,4\n';
+            const blob = new Blob([`Teacher List Template\n${teachersCsv}\n\nMapping Template\n${mappingsCsv}`], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'timetable_master_data_templates.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
         
         // Render holidays list
@@ -502,8 +972,16 @@
         }
         
         function normalizeClassSectionLabel(value) {
-            const raw = toCleanString(value).toUpperCase();
-            if (!raw) return '';
+            const cleaned = toCleanString(value);
+            if (!cleaned) return '';
+
+            const hyphenated = cleaned.replace(/\s*-\s*/g, '-');
+            const hyphenMatch = hyphenated.match(/^GRADE-?([IVX]+|\d+)-([A-Z])$/i);
+            if (hyphenMatch) {
+                return `Grade-${hyphenMatch[1].toUpperCase()}-${hyphenMatch[2].toUpperCase()}`;
+            }
+
+            const raw = cleaned.toUpperCase();
             
             const compact = raw.replace(/\s+/g, '');
             const match = compact.match(/^(?:GRADE)?([IVX]+|\d+)([A-Z])$/);
@@ -512,6 +990,9 @@
             }
             
             const parts = raw.split(/\s+/).filter(Boolean);
+            if (parts.length >= 3 && parts[0] === 'GRADE') {
+                return `Grade-${parts[1]}-${parts[2]}`;
+            }
             if (parts.length >= 2) {
                 return `Grade-${parts[0]}-${parts[1]}`;
             }
@@ -520,7 +1001,9 @@
         }
         
         function getStandardDayOrder() {
-            return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return (state.config && state.config.schoolDays && state.config.schoolDays.length > 0)
+                ? state.config.schoolDays
+                : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
         }
         
         function processStateTimetableWorkbook(workbook) {
@@ -1418,7 +1901,7 @@
             html += '</tr></thead><tbody>';
             
             // Data rows - sort days in correct order
-            const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const dayOrder = getStandardDayOrder();
             
             dayOrder.forEach(dayName => {
                 const dayData = classData.days.find(d => d.dayName === dayName);
@@ -1484,7 +1967,7 @@
             
             let html = '';
             teacherFilters.forEach(teacherFilter => {
-                const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const dayOrder = getStandardDayOrder();
                 const teacherGrid = {};
                 dayOrder.forEach(day => {
                     teacherGrid[day] = {};
@@ -1603,7 +2086,7 @@
                 html += '</tr></thead><tbody>';
                 
                 // Data rows
-                const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const dayOrder = getStandardDayOrder();
                 
                 dayOrder.forEach(dayName => {
                     html += `<tr><td style="font-weight: 600; background-color: #f9f9f9;">${dayName}</td>`;
@@ -1911,7 +2394,7 @@
                 const data = [header];
                 
                 // Add each day's data
-                const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const dayOrder = getStandardDayOrder();
                 
                 dayOrder.forEach(dayName => {
                     const dayData = classData.days.find(d => d.dayName === dayName);
@@ -1959,7 +2442,7 @@
             Object.keys(state.timetableData).forEach(className => {
                 const classData = state.timetableData[className];
                 
-                const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const dayOrder = getStandardDayOrder();
                 
                 dayOrder.forEach(dayName => {
                     const dayData = classData.days.find(d => d.dayName === dayName);
@@ -2024,7 +2507,7 @@
                 const data = [header];
                 
                 // Add days
-                const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const days = getStandardDayOrder();
                 
                 days.forEach(day => {
                     const row = [day];
@@ -2054,10 +2537,13 @@
         // Download CSV template
         function downloadCSVTemplate() {
             // Create CSV template with sample data
-            let csv = 'Class-Section,Day,P1,P2,P3,P4,P5,P6,P7,P8,P9,P10\n';
-            csv += 'Grade-I-A,Monday,T001:Indira:MATHS,T001:Indira:ENGLISH,T002:Sai Priya:EVS,T003:Uma Rani:Hindi,T004:Pravalika:Maths,,,,,\n';
-            csv += 'Grade-I-A,Tuesday,T001:Indira:ENGLISH,T001:Indira:ENGLISH,T002:Sai Priya:EVS,T003:Uma Rani:Hindi,T004:Pravalika:Maths,,,,,\n';
-            csv += 'Grade-I-A,Wednesday,T001:Indira:Telugu,T001:Indira:ENGLISH,T007:Suresh:Games,T003:Uma Rani:Hindi,T008:Adiba:EVS,,,,,\n';
+            const periodHeaders = makePeriodHeaders();
+            let csv = `Class-Section,Day,${periodHeaders.join(',')}\n`;
+            const samplePeriods = ['T001:Indira:MATHS', 'T001:Indira:ENGLISH', 'T002:Sai Priya:EVS', 'T003:Uma Rani:Hindi', 'T004:Pravalika:Maths'];
+            getStandardDayOrder().slice(0, 3).forEach(day => {
+                const periodCells = periodHeaders.map((_, index) => samplePeriods[index] || '');
+                csv += `Grade-I-A,${day},${periodCells.join(',')}\n`;
+            });
             
             // Create download link
             const blob = new Blob([csv], { type: 'text/csv' });

@@ -23,7 +23,13 @@
         </header>
         
         <div class="tabs">
-            <div class="tab active" data-target="holidays-section">
+            <div class="tab active" data-target="setup-section">
+                <i class="fas fa-database"></i> Setup
+            </div>
+            <div class="tab" data-target="ai-prompt-section">
+                <i class="fas fa-wand-magic-sparkles"></i> AI Prompt
+            </div>
+            <div class="tab" data-target="holidays-section">
                 <i class="fas fa-umbrella-beach"></i> Holidays
             </div>
             <div class="tab" data-target="view-timetable-section">
@@ -39,9 +45,134 @@
                 <i class="fas fa-chalkboard-teacher"></i> Teacher Schedule
             </div>
         </div>
+
+        <!-- Setup Section -->
+        <div class="content-section active" id="setup-section">
+            <div class="section-header">
+                <h2><i class="fas fa-database"></i> Local Data Setup</h2>
+                <div class="section-actions">
+                    <button class="btn btn-success" id="downloadDataTemplatesBtn">
+                        <i class="fas fa-file-download"></i> Download Templates
+                    </button>
+                    <button class="btn btn-primary" id="saveMasterDataBtn">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                </div>
+            </div>
+
+            <div class="data-summary">
+                <div class="summary-card">
+                    <h3>Teachers</h3>
+                    <div class="value" id="masterTeachersCount">0</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Class Mappings</h3>
+                    <div class="value" id="masterMappingsCount">0</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Configured Days</h3>
+                    <div class="value" id="configDaysCount">5</div>
+                </div>
+                <div class="summary-card">
+                    <h3>Periods / Day</h3>
+                    <div class="value" id="configPeriodsCount">8</div>
+                </div>
+            </div>
+
+            <div class="setup-grid">
+                <div class="setup-panel">
+                    <h3><i class="fas fa-chalkboard-teacher"></i> Teacher List</h3>
+                    <p>CSV columns: <code>Teacher ID,Teacher Name,Subjects,Phone,Email</code></p>
+                    <input type="file" id="teacherListFileInput" accept=".csv,.txt">
+                    <div class="setup-actions">
+                        <label class="btn btn-primary" for="teacherListFileInput">
+                            <i class="fas fa-file-csv"></i> Import Teachers CSV
+                        </label>
+                        <button class="btn btn-secondary" id="addTeacherRowBtn">
+                            <i class="fas fa-plus"></i> Add Teacher
+                        </button>
+                    </div>
+                    <div class="editable-table-wrap">
+                        <table class="editable-table" id="teacherMasterTable"></table>
+                    </div>
+                </div>
+
+                <div class="setup-panel">
+                    <h3><i class="fas fa-link"></i> Teacher Grade-Section Subject Mapping</h3>
+                    <p>CSV columns: <code>Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week</code></p>
+                    <input type="file" id="teacherMappingFileInput" accept=".csv,.txt">
+                    <div class="setup-actions">
+                        <label class="btn btn-primary" for="teacherMappingFileInput">
+                            <i class="fas fa-file-csv"></i> Import Mapping CSV
+                        </label>
+                        <button class="btn btn-secondary" id="addMappingRowBtn">
+                            <i class="fas fa-plus"></i> Add Mapping
+                        </button>
+                    </div>
+                    <div class="editable-table-wrap">
+                        <table class="editable-table" id="teacherMappingTable"></table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="setup-panel config-panel">
+                <h3><i class="fas fa-sliders"></i> Timetable Configuration</h3>
+                <div class="config-grid">
+                    <div class="form-group">
+                        <label for="schoolDaysInput">School Days</label>
+                        <input type="text" id="schoolDaysInput" class="form-control" value="Monday,Tuesday,Wednesday,Thursday,Friday">
+                    </div>
+                    <div class="form-group">
+                        <label for="periodsPerDayInput">Periods Monday to Friday</label>
+                        <input type="number" id="periodsPerDayInput" class="form-control" min="1" max="12" value="8">
+                    </div>
+                    <div class="form-group">
+                        <label for="periodsPerTeacherInput">Max Periods Per Teacher</label>
+                        <input type="number" id="periodsPerTeacherInput" class="form-control" min="1" max="60" value="30">
+                    </div>
+                    <div class="form-group">
+                        <label for="aiPromptStyleInput">AI Prompt Detail</label>
+                        <select id="aiPromptStyleInput" class="form-control">
+                            <option value="compact">Compact</option>
+                            <option value="detailed">Detailed with CSV Data</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Prompt Section -->
+        <div class="content-section" id="ai-prompt-section">
+            <div class="section-header">
+                <h2><i class="fas fa-wand-magic-sparkles"></i> AI Timetable Prompt</h2>
+                <div class="section-actions">
+                    <button class="btn btn-primary" id="generatePromptBtn">
+                        <i class="fas fa-sync-alt"></i> Generate Prompt
+                    </button>
+                    <button class="btn btn-success" id="copyPromptBtn">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                    <button class="btn btn-secondary" id="downloadPromptBtn">
+                        <i class="fas fa-file-download"></i> Download
+                    </button>
+                </div>
+            </div>
+            <div class="prompt-layout">
+                <div class="prompt-notes">
+                    <h3>Prompt Rules</h3>
+                    <ul>
+                        <li>Use only locally imported teacher and class mapping data.</li>
+                        <li>Generate Monday to Friday timetable with the configured periods.</li>
+                        <li>A teacher must not appear in more than one class in the same day and period.</li>
+                        <li>Return CSV ready for the Upload Timetable CSV importer.</li>
+                    </ul>
+                </div>
+                <textarea id="aiPromptOutput" class="form-control prompt-output" spellcheck="false"></textarea>
+            </div>
+        </div>
         
         <!-- Holidays Section -->
-        <div class="content-section active" id="holidays-section">
+        <div class="content-section" id="holidays-section">
             <div class="section-header">
                 <h2><i class="fas fa-umbrella-beach"></i> Holiday Management</h2>
                 <div class="section-actions">

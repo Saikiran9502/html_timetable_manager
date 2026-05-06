@@ -75,6 +75,7 @@
         
         .tabs {
             display: flex;
+            flex-wrap: wrap;
             background-color: white;
             border-radius: 10px;
             overflow: hidden;
@@ -83,7 +84,7 @@
         }
         
         .tab {
-            flex: 1;
+            flex: 1 0 160px;
             padding: 15px;
             text-align: center;
             cursor: pointer;
@@ -276,6 +277,121 @@
             gap: 20px;
             margin-bottom: 30px;
         }
+
+.setup-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.setup-panel {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 18px;
+    background-color: #fff;
+}
+
+.setup-panel h3 {
+    color: var(--primary-color);
+    margin-bottom: 8px;
+}
+
+.setup-panel p {
+    color: #666;
+    margin-bottom: 14px;
+}
+
+.setup-panel > input[type="file"] {
+    display: none;
+}
+
+.setup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.editable-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.editable-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 760px;
+}
+
+.editable-table th {
+    background-color: #f0f4ff;
+    color: #2d3b80;
+    text-align: left;
+    padding: 10px;
+    font-size: 0.9rem;
+}
+
+.editable-table td {
+    border-top: 1px solid var(--border-color);
+    padding: 8px;
+}
+
+.editable-table input {
+    width: 100%;
+    min-width: 90px;
+    border: 1px solid #d8d8d8;
+    border-radius: 5px;
+    padding: 8px;
+    font-size: 0.95rem;
+}
+
+.btn-sm {
+    padding: 7px 10px;
+    font-size: 0.85rem;
+}
+
+.config-panel {
+    margin-top: 10px;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 2fr) repeat(3, minmax(160px, 1fr));
+    gap: 16px;
+    align-items: end;
+}
+
+.prompt-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) 1fr;
+    gap: 20px;
+}
+
+.prompt-notes {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 18px;
+    background-color: #fbfcff;
+}
+
+.prompt-notes h3 {
+    color: var(--primary-color);
+    margin-bottom: 10px;
+}
+
+.prompt-notes ul {
+    padding-left: 18px;
+    color: #555;
+}
+
+.prompt-output {
+    min-height: 520px;
+    font-family: Consolas, Monaco, monospace;
+    line-height: 1.45;
+    resize: vertical;
+}
         
         .summary-card {
             background-color: white;
@@ -744,6 +860,12 @@
             .filter-controls select {
                 width: 100%;
             }
+
+    .setup-grid,
+    .config-grid,
+    .prompt-layout {
+        grid-template-columns: 1fr;
+    }
             
     .time-setup-row {
         grid-template-columns: 1fr;
