@@ -148,6 +148,8 @@
 
             // Local setup and AI prompt
             document.getElementById('teacherListFileInput').addEventListener('change', handleTeacherListUpload);
+            const exportBtn = document.getElementById('exportTeachersBtn');
+            if (exportBtn) exportBtn.addEventListener('click', exportTeacherList);
             document.getElementById('teacherMappingFileInput').addEventListener('change', handleTeacherMappingUpload);
             document.getElementById('addTeacherRowBtn').addEventListener('click', addTeacherRow);
             document.getElementById('addMappingRowBtn').addEventListener('click', addMappingRow);
@@ -682,6 +684,23 @@ Return CSV now.`;
             const a = document.createElement('a');
             a.href = url;
             a.download = 'timetable_master_data_templates.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportTeacherList() {
+            const csv = toTeacherCSV(state.teachers || []);
+            if (!csv || csv.trim() === '') {
+                alert('No teachers to export.');
+                return;
+            }
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'teacher-list.csv';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
