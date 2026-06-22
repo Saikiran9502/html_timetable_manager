@@ -496,23 +496,35 @@
         function renderTeacherMasterTable() {
             const table = document.getElementById('teacherMasterTable');
             const rows = state.teachers || [];
+            const classSectionOptions = getClassSectionOptions();
             table.innerHTML = `
                 <thead>
-                    <tr><th>Teacher ID</th><th>Teacher Name</th><th>Class Teacher Subject</th><th>Class Teacher Grade</th><th>Class Teacher Section</th><th>Phone</th><th>Email</th><th>Action</th></tr>
+                    <tr><th>Teacher ID</th><th>Teacher Name</th><th>Class Teacher Subject</th><th>Class Teacher Grade/Section</th><th>Phone</th><th>Email</th><th>Action</th></tr>
                 </thead>
                 <tbody>
-                    ${rows.map((teacher, index) => `
+                    ${rows.map((teacher, index) => {
+                        const selectedValue = teacher.classTeacherGrade && teacher.classTeacherSection
+                            ? `${escapeHtml(teacher.classTeacherGrade)}|${escapeHtml(teacher.classTeacherSection)}`
+                            : '';
+                        return `
                         <tr data-index="${index}">
                             <td><input value="${escapeHtml(teacher.id)}" data-field="id"></td>
                             <td><input value="${escapeHtml(teacher.name)}" data-field="name"></td>
                             <td><input value="${escapeHtml(teacher.classTeacherSubject || teacher.subjects || '')}" data-field="classTeacherSubject"></td>
-                            <td><input value="${escapeHtml(teacher.classTeacherGrade || '')}" data-field="classTeacherGrade"></td>
-                            <td><input value="${escapeHtml(teacher.classTeacherSection || '')}" data-field="classTeacherSection"></td>
+                            <td>
+                                <select data-field="classTeacherGrade" onchange="syncTeacherGradeSection(this)">
+                                    <option value=""></option>
+                                    ${classSectionOptions.map(option => `
+                                        <option value="${escapeHtml(option.value)}"${option.value === selectedValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>
+                                    `).join('')}
+                                </select>
+                                <input type="hidden" value="${escapeHtml(teacher.classTeacherSection || '')}" data-field="classTeacherSection">
+                            </td>
                             <td><input value="${escapeHtml(teacher.phone)}" data-field="phone"></td>
                             <td><input value="${escapeHtml(teacher.email)}" data-field="email"></td>
                             <td><button class="btn btn-danger btn-sm" onclick="deleteTeacherRow(${index})"><i class="fas fa-trash"></i></button></td>
                         </tr>
-                    `).join('')}
+                    `}).join('')}
                 </tbody>
             `;
         }
@@ -539,6 +551,33 @@
             `;
         }
 
+        function getClassSectionOptions() {
+            const sections = state.classSections || [];
+            const options = sections.map(item => {
+                const classValue = item.class || '';
+                const sectionValue = item.section || '';
+                const label = `${classValue}-${sectionValue}`;
+                const value = `${classValue}|${sectionValue}`;
+                return { label, value };
+            });
+            return options.sort((a, b) => safeLocaleCompare(a.label, b.label));
+        }
+
+        function syncTeacherGradeSection(select) {
+            const row = select.closest('tr');
+            if (!row) return;
+            const hiddenSection = row.querySelector('input[data-field="classTeacherSection"]');
+            const selected = toCleanString(select.value);
+            if (!hiddenSection) return;
+            if (!selected) {
+                hiddenSection.value = '';
+                return;
+            }
+            const [gradePart, sectionPart] = selected.split('|');
+            hiddenSection.value = sectionPart || '';
+            select.value = `${gradePart}|${hiddenSection.value}`;
+        }
+
         function readTableRows(tableId, fields) {
             return Array.from(document.querySelectorAll(`#${tableId} tbody tr`)).map(row => {
                 const item = {};
@@ -550,9 +589,20 @@
             });
         }
 
+        function normalizeTeacherGradeSection(teacher) {
+            const combined = toCleanString(teacher.classTeacherGrade || '');
+            const splitMatch = combined.split('|');
+            if (splitMatch.length === 2) {
+                teacher.classTeacherGrade = splitMatch[0];
+                teacher.classTeacherSection = splitMatch[1];
+            }
+            return teacher;
+        }
+
         function saveMasterDataFromTables() {
             syncConfigFromInputs();
             state.teachers = readTableRows('teacherMasterTable', ['id', 'name', 'classTeacherSubject', 'classTeacherGrade', 'classTeacherSection', 'phone', 'email'])
+                .map(normalizeTeacherGradeSection)
                 .filter(teacher => teacher.name);
             state.teacherMappings = readTableRows('teacherMappingTable', ['teacherId', 'teacherName', 'gradeSection', 'subject', 'periodsPerWeek'])
                 .map((mapping, index) => ({
