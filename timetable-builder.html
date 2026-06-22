@@ -12,6 +12,7 @@
     rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
     :root {
       --ink: #1f2a44;
@@ -1035,6 +1036,11 @@
           P.T. period taught jointly to grades 8, 9 &amp; 10). The whole group gets the same slot; it counts toward
           each section's weekly schedule without needing the teacher present more than once.</p>
         <div id="combinedSessionsList"></div>
+        <div class="btnrow" style="gap: 8px; margin-top: 8px;">
+          <button class="secondary sm" id="downloadCombinedSessionsCsvBtn">⇣ Download CSV</button>
+          <button class="secondary sm" id="importCombinedSessionsCsvBtn">⇡ Import CSV</button>
+          <input type="file" id="combinedSessionsCsvInput" accept=".csv" style="display:none;">
+        </div>
         <button class="secondary sm" id="addCombinedSessionBtn" style="margin-top:8px;width:100%;">+ Add combined
           session</button>
       </div>
@@ -1053,6 +1059,11 @@
           <div id="labPairsList" class="daygrid"></div>
         </div>
         <div id="labGroupsList"></div>
+        <div class="btnrow" style="gap: 8px; margin-top: 8px;">
+          <button class="secondary sm" id="downloadLabBlocksCsvBtn">⇣ Download CSV</button>
+          <button class="secondary sm" id="importLabBlocksCsvBtn">⇡ Import CSV</button>
+          <input type="file" id="labBlocksCsvInput" accept=".csv" style="display:none;">
+        </div>
         <button class="secondary sm" id="addLabGroupBtn" style="margin-top:8px;width:100%;">+ Add teacher/section
           group</button>
       </div>
@@ -2238,6 +2249,32 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
       }
 
       function initCombinedSessions() {
+        const downloadBtn = document.getElementById("downloadCombinedSessionsCsvBtn");
+        const importBtn = document.getElementById("importCombinedSessionsCsvBtn");
+        const fileInput = document.getElementById("combinedSessionsCsvInput");
+
+        if (downloadBtn) {
+          downloadBtn.addEventListener("click", exportCombinedSessionsCsv);
+        }
+        if (importBtn && fileInput) {
+          importBtn.addEventListener("click", () => fileInput.click());
+          fileInput.addEventListener("change", () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+              const result = importCombinedSessionsCsv(ev.target.result);
+              if (result.ok) {
+                alert(result.msg);
+                save();
+              } else {
+                alert(result.msg);
+              }
+            };
+            reader.readAsText(file);
+          });
+        }
+
         document.getElementById("addCombinedSessionBtn").addEventListener("click", () => {
           if (!state.combinedSessions) state.combinedSessions = [];
           state.combinedSessions.push({
@@ -2347,6 +2384,32 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
       function initLabBlocks() {
         ensureLabBlocks();
         const subjEl = document.getElementById("labSubject");
+        const downloadBtn = document.getElementById("downloadLabBlocksCsvBtn");
+        const importBtn = document.getElementById("importLabBlocksCsvBtn");
+        const fileInput = document.getElementById("labBlocksCsvInput");
+
+        if (downloadBtn) {
+          downloadBtn.addEventListener("click", exportLabBlocksCsv);
+        }
+        if (importBtn && fileInput) {
+          importBtn.addEventListener("click", () => fileInput.click());
+          fileInput.addEventListener("change", () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+              const result = importLabBlocksCsv(ev.target.result);
+              if (result.ok) {
+                alert(result.msg);
+                save();
+              } else {
+                alert(result.msg);
+              }
+            };
+            reader.readAsText(file);
+          });
+        }
+
         subjEl.value = state.labBlocks.subject || "";
         subjEl.addEventListener("input", () => {
           state.labBlocks.subject = subjEl.value.trim();
@@ -2467,8 +2530,8 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
       }
 
       // ---- YAML EXPORT ----
-      function downloadYamlFile(filename, content) {
-        const blob = new Blob([content], { type: "text/yaml;charset=utf-8;" });
+      function downloadTextFile(filename, content, mime = "text/plain;charset=utf-8;") {
+        const blob = new Blob([content], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -2477,6 +2540,10 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+      }
+
+      function downloadYamlFile(filename, content) {
+        downloadTextFile(filename, content, "text/yaml;charset=utf-8;");
       }
 
       function exportConfigYaml() {
@@ -2501,6 +2568,88 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
 
       function parseYaml(text) {
         return jsyaml.load(text);
+      }
+
+      function exportCombinedSessionsCsv() {
+        const rows = (state.combinedSessions || []).map(cs => ({
+          id: cs.id || "",
+          subject: cs.subject || "",
+          teacher: cs.teacher || "",
+          periodsPerWeek: cs.periodsPerWeek || "",
+          sections: (cs.sections || []).join(";")
+        }));
+        const csv = Papa.unparse(rows, { quotes: true });
+        downloadTextFile("combined-sessions.csv", csv, "text/csv;charset=utf-8;");
+      }
+
+      function parseSectionsValue(raw) {
+        if (!raw) return [];
+        return String(raw).split(/;|,/).map(s => s.trim()).filter(Boolean);
+      }
+
+      function importCombinedSessionsCsv(csvText) {
+        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        if (parsed.errors && parsed.errors.length) {
+          return { ok: false, msg: parsed.errors.map(e => e.message).join("; ") };
+        }
+        const sessions = parsed.data.map(row => ({
+          id: row.id || genCombinedId(),
+          subject: String(row.subject || "").trim(),
+          teacher: String(row.teacher || "").trim(),
+          periodsPerWeek: Number(row.periodsPerWeek || row.periods || 2) || 2,
+          sections: parseSectionsValue(row.sections || row.section || "")
+        })).filter(cs => cs.subject || cs.teacher || cs.sections.length > 0);
+        state.combinedSessions = sessions;
+        state.grids = {};
+        state.activeTab = "";
+        deriveClassSubjects();
+        save();
+        renderCombinedSessions();
+        renderAll();
+        return { ok: true, msg: `Imported ${sessions.length} combined session(s).` };
+      }
+
+      function exportLabBlocksCsv() {
+        const rows = (state.labBlocks.groups || []).map(g => ({
+          id: g.id || "",
+          teacher: g.teacher || "",
+          blocksPerWeek: g.blocksPerWeek || "",
+          sections: (g.sections || []).join(";"),
+          subject: state.labBlocks.subject || "",
+          pairs: (state.labBlocks.pairs || []).map(pair => `${pair[0]}-${pair[1]}`).join(";")
+        }));
+        const csv = Papa.unparse(rows, { quotes: true });
+        downloadTextFile("lab-blocks.csv", csv, "text/csv;charset=utf-8;");
+      }
+
+      function importLabBlocksCsv(csvText) {
+        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        if (parsed.errors && parsed.errors.length) {
+          return { ok: false, msg: parsed.errors.map(e => e.message).join("; ") };
+        }
+        const groups = parsed.data.map(row => ({
+          id: row.id || genCombinedId(),
+          teacher: String(row.teacher || "").trim(),
+          blocksPerWeek: Number(row.blocksPerWeek || row.blocks || 1) || 1,
+          sections: parseSectionsValue(row.sections || row.section || "")
+        })).filter(g => g.teacher || g.sections.length > 0);
+        if (parsed.data.length > 0) {
+          const first = parsed.data[0];
+          if (first.subject) state.labBlocks.subject = String(first.subject).trim();
+          if (first.pairs) {
+            state.labBlocks.pairs = String(first.pairs).split(/;|,/).map(part => {
+              const [a, b] = String(part).trim().split("-").map(Number);
+              return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
+            }).filter(Boolean);
+          }
+        }
+        state.labBlocks.groups = groups;
+        state.grids = {};
+        state.activeTab = "";
+        save();
+        renderLabGroups();
+        renderAll();
+        return { ok: true, msg: `Imported ${groups.length} lab block group(s).` };
       }
 
       function getConfigForExport() {
