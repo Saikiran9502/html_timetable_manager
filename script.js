@@ -123,13 +123,9 @@
                 try {
                     const parsedSubjects = JSON.parse(storedSubjects) || [];
                     state.subjects = (parsedSubjects || [])
-                        .map(item => {
-                            if (typeof item === 'string') return { code: toCleanString(item), name: toCleanString(item) };
-                            if (item && typeof item === 'object') return { code: toCleanString(item.code || item.name), name: toCleanString(item.name || item.code) };
-                            return null;
-                        })
-                        .filter(s => s && s.code)
-                        .sort((a, b) => safeLocaleCompare(a.code, b.code));
+                        .map(item => toCleanString(item))
+                        .filter(Boolean)
+                        .sort((a, b) => safeLocaleCompare(a, b));
                 } catch(e) {
                     state.subjects = [];
                 }
@@ -524,6 +520,7 @@
             const table = document.getElementById('teacherMasterTable');
             const rows = state.teachers || [];
             const classSectionOptions = getClassSectionOptions();
+            const baseSubjectOptions = getSubjectOptions();
             table.innerHTML = `
                 <thead>
                     <tr><th>Teacher ID</th><th>Teacher Name</th><th>Class Teacher Subject</th><th>Class Teacher Grade/Section</th><th>Phone</th><th>Email</th><th>Action</th></tr>
@@ -533,11 +530,27 @@
                         const selectedValue = teacher.classTeacherGrade && teacher.classTeacherSection
                             ? `${escapeHtml(teacher.classTeacherGrade)}|${escapeHtml(teacher.classTeacherSection)}`
                             : '';
+                        const subjectValue = teacher.classTeacherSubject || teacher.subjects || '';
+                        
+                        // Dynamically ensure the current value is part of the dropdown options
+                        const rowSubjectOptions = [...baseSubjectOptions];
+                        if (subjectValue && !rowSubjectOptions.includes(subjectValue)) {
+                            rowSubjectOptions.push(subjectValue);
+                            rowSubjectOptions.sort((a, b) => safeLocaleCompare(a, b));
+                        }
+                        
                         return `
                         <tr data-index="${index}">
                             <td><input value="${escapeHtml(teacher.id)}" data-field="id"></td>
                             <td><input value="${escapeHtml(teacher.name)}" data-field="name"></td>
-                            <td><input value="${escapeHtml(teacher.classTeacherSubject || teacher.subjects || '')}" data-field="classTeacherSubject"></td>
+                            <td>
+                                <select data-field="classTeacherSubject">
+                                    <option value=""></option>
+                                    ${rowSubjectOptions.map(option => `
+                                        <option value="${escapeHtml(option)}"${option === subjectValue ? ' selected' : ''}>${escapeHtml(option)}</option>
+                                    `).join('')}
+                                </select>
+                            </td>
                             <td>
                                 <select data-field="classTeacherGrade" onchange="syncTeacherGradeSection(this)">
                                     <option value=""></option>
@@ -560,7 +573,7 @@
             const table = document.getElementById('teacherMappingTable');
             const rows = state.teacherMappings || [];
             const classOptions = getClassSectionOptions();
-            const subjectOptions = getSubjectOptions();
+            const baseSubjectOptions = getSubjectOptions();
             table.innerHTML = `
                 <thead>
                     <tr><th>Teacher ID</th><th>Teacher Name</th><th>Grade-Section</th><th>Subject</th><th>Periods / Week</th><th>Action</th></tr>
@@ -569,6 +582,14 @@
                     ${rows.map((mapping, index) => {
                         const gradeValue = mapping.gradeSection ? escapeHtml(mapping.gradeSection) : '';
                         const subjectValue = mapping.subject ? escapeHtml(mapping.subject) : '';
+                        
+                        // Dynamically ensure the current value is part of the dropdown options
+                        const rowSubjectOptions = [...baseSubjectOptions];
+                        if (subjectValue && !rowSubjectOptions.includes(subjectValue)) {
+                            rowSubjectOptions.push(subjectValue);
+                            rowSubjectOptions.sort((a, b) => safeLocaleCompare(a, b));
+                        }
+                        
                         return `
                         <tr data-index="${index}">
                             <td><input value="${escapeHtml(mapping.teacherId)}" data-field="teacherId"></td>
@@ -584,8 +605,8 @@
                             <td>
                                 <select data-field="subject">
                                     <option value=""></option>
-                                    ${subjectOptions.map(option => `
-                                        <option value="${escapeHtml(option.code)}"${option.code === subjectValue ? ' selected' : ''}>${escapeHtml(option.code)} - ${escapeHtml(option.name)}</option>
+                                    ${rowSubjectOptions.map(option => `
+                                        <option value="${escapeHtml(option)}"${option === subjectValue ? ' selected' : ''}>${escapeHtml(option)}</option>
                                     `).join('')}
                                 </select>
                             </td>
@@ -650,30 +671,107 @@
         }
 
         function saveMasterDataFromTables() {
-            syncConfigFromInputs();
-            state.teachers = readTableRows('teacherMasterTable', ['id', 'name', 'classTeacherSubject', 'classTeacherGrade', 'classTeacherSection', 'phone', 'email'])
-                .map(normalizeTeacherGradeSection)
-                .filter(teacher => teacher.name);
-            state.teacherMappings = readTableRows('teacherMappingTable', ['teacherId', 'teacherName', 'gradeSection', 'subject', 'periodsPerWeek'])
-                .map((mapping, index) => ({
-                    ...mapping,
-                    id: `M${index + 1}`,
-                    teacherName: mapping.teacherName || findTeacherNameById(mapping.teacherId),
-                    gradeSection: normalizeClassSectionLabel(mapping.gradeSection)
-                }))
-                .filter(mapping => mapping.gradeSection && mapping.subject && (mapping.teacherId || mapping.teacherName));
+            try {
+                // Save config first so days/periods count updates
+                syncConfigFromInputs();
+                
+                const rawTeachers = readTableRows('teacherMasterTable', ['id', 'name', 'subject', 'grade', 'section', 'phone', 'email']);
+                const rawMappings = readTableRows('teacherMappingTable', ['teacherId', 'teacherName', 'gradeSection', 'subject', 'periodsPerWeek']);
+                
+                duplicateCheckCache.clear();
+                // Validate and process teachers
+                const validationResults = { teachers: [], mappings: [], warnings: [] };
+            
+            state.teachers = rawTeachers
+                .map((teacher, index) => {
+                    const normalized = normalizeTeacherGradeSection(teacher);
+                    
+                    // Skip empty rows
+                    if (!toCleanString(normalized.name)) {
+                        return null;
+                    }
+                    
+                    // Validate teacher name
+                    if (!toCleanString(normalized.name)) {
+                        validationResults.warnings.push(`Row ${index + 1}: Skipped teacher with empty name`);
+                        return null;
+                    }
+                    
+                    return normalized;
+                })
+                .filter(Boolean);
+            
+            // Validate and process mappings
+            state.teacherMappings = rawMappings
+                .map((mapping, index) => {
+                    // Skip empty rows
+                    if (!toCleanString(mapping.gradeSection) && !toCleanString(mapping.subject)) {
+                        return null;
+                    }
+                    
+                    // Validate required fields
+                    const classValidation = validateClassSection(mapping.gradeSection);
+                    const subjectValidation = validateSubjectSelection(mapping.subject);
+                    const teacherValidation = validateTeacherSelection(mapping.teacherId, mapping.teacherName);
+                    
+                    if (!classValidation.valid) {
+                        validationResults.warnings.push(`Row ${index + 1}: ${classValidation.error}`);
+                        return null;
+                    }
+                    
+                    if (!subjectValidation.valid) {
+                        validationResults.warnings.push(`Row ${index + 1}: ${subjectValidation.error}`);
+                        return null;
+                    }
+                    
+                    if (!teacherValidation.valid) {
+                        validationResults.warnings.push(`Row ${index + 1}: ${teacherValidation.error}`);
+                        return null;
+                    }
+                    
+                    const processedMapping = {
+                        ...mapping,
+                        id: `M${index + 1}`,
+                        teacherId: teacherValidation.teacherId,
+                        teacherName: teacherValidation.teacherName || findTeacherNameById(mapping.teacherId),
+                        gradeSection: normalizeClassSectionLabel(mapping.gradeSection),
+                        subject: subjectValidation.normalized
+                    };
+                    
+                    // Check for duplicates
+                    const duplicateCheck = checkForDuplicateMapping(processedMapping);
+                    if (duplicateCheck.isDuplicate) {
+                        validationResults.warnings.push(`Row ${index + 1}: Duplicate mapping detected (${processedMapping.gradeSection}, ${processedMapping.subject})`);
+                    }
+                    
+                    return processedMapping;
+                })
+                .filter(Boolean);
 
             rebuildTeacherSubjectMapFromMasterData();
             saveMasterDataToStorage();
             saveTeacherSubjectMapToStorage();
+            
             const updatedPeriods = autoFillMissingSubjectsFromTeacherMap();
             if (updatedPeriods > 0) saveTimetableToStorage();
+            
             renderTeacherMasterTable();
             renderTeacherMappingTable();
             updateSetupSummary();
             updateClassFilters();
             renderAIPrompt();
-            alert("Local setup data saved.");
+            
+            // Show results
+            let message = 'Local setup data saved successfully.';
+            if (validationResults.warnings.length > 0) {
+                message += `\n\nValidation warnings (${validationResults.warnings.length}):\n`;
+                message += validationResults.warnings.slice(0, 5).join('\n');
+                if (validationResults.warnings.length > 5) {
+                    message += `\n... and ${validationResults.warnings.length - 5} more`;
+                }
+            }
+            
+            alert(message);
         }
 
         // Save master data without showing an alert (used by add row functions)
@@ -784,12 +882,11 @@
             if (!table) return;
             const rows = state.subjects || [];
             table.innerHTML = `
-                <thead><tr><th>Subject Code</th><th>Subject Name</th><th>Action</th></tr></thead>
+                <thead><tr><th>Subject</th><th>Action</th></tr></thead>
                 <tbody>
                     ${rows.map((subject, i) => `
                         <tr data-index="${i}">
-                            <td>${escapeHtml(subject.code)}</td>
-                            <td>${escapeHtml(subject.name)}</td>
+                            <td>${escapeHtml(subject)}</td>
                             <td><button class="btn btn-danger btn-sm" onclick="deleteSubject(${i})"><i class="fas fa-trash"></i></button></td>
                         </tr>
                     `).join('')}
@@ -798,34 +895,22 @@
         }
 
         function getSubjectOptions() {
-            return (state.subjects || []).slice().sort((a, b) => safeLocaleCompare(a.code, b.code));
+            return (state.subjects || []).slice().sort((a, b) => safeLocaleCompare(a, b));
         }
 
         function generateSubjectsFromInput() {
             const input = document.getElementById('bulkSubjectsInput');
             if (!input) return;
             const lines = input.value.split(/\r?\n/).map(l => toCleanString(l)).filter(Boolean);
-            const uniques = new Map();
-            (state.subjects || []).forEach(s => uniques.set(toCleanString(s.code), s));
-            
-            lines.forEach(line => {
-                const parts = line.split(/[,:]/);
-                let code = toCleanString(parts[0]);
-                let name = parts.length > 1 ? toCleanString(parts.slice(1).join(line.includes(',') ? ',' : ':')) : code;
-                
-                if (code.length > name.length && name.length > 0) {
-                    const tmp = code;
-                    code = name;
-                    name = tmp;
-                }
-                
-                if (code) {
-                    uniques.set(code, { code, name });
-                }
+            const uniques = new Set((state.subjects || []).map(s => toCleanString(s)));
+            lines.forEach(subject => {
+                if (subject) uniques.add(subject);
             });
-            state.subjects = Array.from(uniques.values()).sort((a, b) => safeLocaleCompare(a.code, b.code));
+            state.subjects = Array.from(uniques).sort((a, b) => safeLocaleCompare(a, b));
             saveMasterDataToStorage();
             renderSubjectsTable();
+            renderTeacherMasterTable();
+            renderTeacherMappingTable();
             alert('Generated ' + lines.length + ' subject entries.');
         }
 
@@ -834,12 +919,14 @@
             state.subjects = [];
             saveMasterDataToStorage();
             renderSubjectsTable();
+            renderTeacherMasterTable();
+            renderTeacherMappingTable();
         }
 
         function exportSubjectsCSV() {
             const rows = state.subjects || [];
             if (rows.length === 0) { alert('No subjects to export.'); return; }
-            const csv = 'Subject Code,Subject Name\n' + rows.map(s => `${escapeCSVField(s.code)},${escapeCSVField(s.name)}`).join('\n');
+            const csv = 'Subject\n' + rows.map(escapeCSVField).join('\n');
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -862,59 +949,48 @@
                         alert('Empty or invalid CSV');
                         return;
                     }
-                    
                     let start = 0;
-                    let cIdx = 0;
-                    let nIdx = 1;
-
                     const header = rows[0].map(c => toCleanString(c).toLowerCase());
-                    const codeMatch = header.findIndex(h => h.includes('code') || h === 'subject');
-                    const nameMatch = header.findIndex(h => h.includes('name'));
-
-                    if (codeMatch >= 0 || nameMatch >= 0) {
+                    let subjectIndex = 0;
+                    
+                    // Detect if there is a header row
+                    const hasHeader = header.some(c => c.includes('subject'));
+                    if (hasHeader) {
                         start = 1;
-                        cIdx = Math.max(0, codeMatch);
-                        nIdx = nameMatch >= 0 ? nameMatch : (rows[0].length > 1 ? (cIdx === 0 ? 1 : 0) : cIdx);
-                    } else if (rows[0] && rows[0].length > 1) {
-                        // No headers detected. Guess by length: Subject Codes are usually shorter than Subject Names.
-                        const len0 = toCleanString(rows[0][0]).length;
-                        const len1 = toCleanString(rows[0][1]).length;
-                        if (len0 > len1) {
-                            cIdx = 1;
-                            nIdx = 0;
-                        } else {
-                            cIdx = 0;
-                            nIdx = 1;
+                        // Try to find the exact "subject" column (e.g. subject name)
+                        subjectIndex = header.indexOf('subject');
+                        if (subjectIndex === -1) {
+                            subjectIndex = header.indexOf('subject name');
+                        }
+                        if (subjectIndex === -1) {
+                            // Find any column containing "subject" but not containing "id" or "code"
+                            subjectIndex = header.findIndex(h => h.includes('subject') && !h.includes('id') && !h.includes('code'));
+                            if (subjectIndex === -1) {
+                                // Fallback to first column that contains "subject"
+                                subjectIndex = header.findIndex(h => h.includes('subject'));
+                            }
+                        }
+                        if (subjectIndex === -1) {
+                            subjectIndex = 0;
                         }
                     }
-
+                    
                     const parsed = [];
                     for (let i = start; i < rows.length; i++) {
-                        if (!rows[i] || rows[i].length === 0) continue;
-                        let code = toCleanString(rows[i][cIdx] || '');
-                        let name = toCleanString(rows[i][nIdx] || code);
-                        
-                        // Smart swap: Subject Codes are typically shorter than Names.
-                        // If code is longer than name, they are likely swapped.
-                        if (code.length > name.length && name.length > 0) {
-                            const tmp = code;
-                            code = name;
-                            name = tmp;
-                        }
-                        
-                        if (code) parsed.push({ code, name });
+                        const val = toCleanString(rows[i][subjectIndex] || '');
+                        if (val) parsed.push(val);
                     }
-                    
                     if (parsed.length === 0) {
                         alert('No valid subject rows found in CSV.');
                         return;
                     }
-                    const uniques = new Map();
-                    (state.subjects || []).forEach(s => uniques.set(toCleanString(s.code), s));
-                    parsed.forEach(s => uniques.set(s.code, s));
-                    state.subjects = Array.from(uniques.values()).sort((a, b) => safeLocaleCompare(a.code, b.code));
+                    const uniques = new Set((state.subjects || []).map(s => toCleanString(s)));
+                    parsed.forEach(subject => uniques.add(subject));
+                    state.subjects = Array.from(uniques).sort((a, b) => safeLocaleCompare(a, b));
                     saveMasterDataToStorage();
                     renderSubjectsTable();
+                    renderTeacherMasterTable();
+                    renderTeacherMappingTable();
                     alert('Imported ' + parsed.length + ' subject rows.');
                 } catch (err) {
                     console.error(err);
@@ -1441,6 +1517,75 @@ Return CSV now.`;
         
         function safeLocaleCompare(a, b) {
             return String(a ?? '').localeCompare(String(b ?? ''), undefined, { sensitivity: 'base' });
+        }
+        
+        const duplicateCheckCache = new Set();
+
+        function validateClassSection(value) {
+            const cleaned = toCleanString(value);
+            if (!cleaned) {
+                return { valid: false, error: 'Class-Section is empty' };
+            }
+            const normalized = normalizeClassSectionLabel(cleaned);
+            // Format validation: Grade-Class-Section (e.g., Grade-I-A or Grade-10-A)
+            const match = normalized.match(/^Grade-([IVX\d]+)-([A-Z])$/i);
+            if (!match) {
+                return { valid: false, error: `Invalid Class-Section format: "${value}". Expected format like "Grade-I-A"` };
+            }
+            return { valid: true, normalized };
+        }
+
+        function validateSubjectSelection(subject) {
+            const cleaned = toCleanString(subject);
+            if (!cleaned) {
+                return { valid: false, error: 'Subject is empty' };
+            }
+            
+            const subjectOptions = getSubjectOptions() || [];
+            const found = subjectOptions.find(s => safeLocaleCompare(s, cleaned) === 0);
+            if (!found) {
+                return { valid: false, error: `Subject "${subject}" is not defined in subjects list` };
+            }
+            return { valid: true, normalized: found };
+        }
+
+        function validateTeacherSelection(teacherId, teacherName) {
+            const id = toCleanString(teacherId);
+            const name = toCleanString(teacherName);
+            
+            if (!id && !name) {
+                return { valid: false, error: 'Both Teacher ID and Teacher Name are empty' };
+            }
+            
+            const teachers = state.teachers || [];
+            let foundTeacher = null;
+            
+            if (id) {
+                foundTeacher = teachers.find(t => toCleanString(t.id).toLowerCase() === id.toLowerCase());
+                if (!foundTeacher) {
+                    return { valid: false, error: `Teacher ID "${teacherId}" not found in teachers list` };
+                }
+            } else if (name) {
+                foundTeacher = teachers.find(t => toCleanString(t.name).toLowerCase() === name.toLowerCase());
+                if (!foundTeacher) {
+                    return { valid: false, error: `Teacher Name "${teacherName}" not found in teachers list` };
+                }
+            }
+            
+            return {
+                valid: true,
+                teacherId: foundTeacher.id,
+                teacherName: foundTeacher.name
+            };
+        }
+
+        function checkForDuplicateMapping(mapping) {
+            const key = `${toCleanString(mapping.gradeSection).toLowerCase()}|${toCleanString(mapping.subject).toLowerCase()}`;
+            if (duplicateCheckCache.has(key)) {
+                return { isDuplicate: true };
+            }
+            duplicateCheckCache.add(key);
+            return { isDuplicate: false };
         }
         
         function assignTeacherIdsInTimetableData() {
