@@ -738,10 +738,10 @@
                 .map(function(item) {
                     const cls = item.class || '';
                     const sec = item.section || '';
-                    const label = cls + '-' + sec;
-                    return { label: label, value: label };
+                    const label = cls + sec;
+                    return { label: label, value: cls + '|' + sec };
                 })
-                .filter(function(o) { return o.label !== '-'; })
+                .filter(function(o) { return o.label !== ''; })
                 .sort(function(a, b) { return safeLocaleCompare(a.label, b.label); });
         }
 
@@ -1257,7 +1257,7 @@ Return CSV now.`;
 
         function downloadMasterDataTemplates() {
             const teachersCsv = 'Teacher ID,Teacher Name,Class Teacher Subject,Class Teacher Grade,Class Teacher Section,Phone,Email\nT001,Indira,Maths,I,A,9876543210,indira@school.com\nT002,Sai Priya,EVS,II,A,9876543211,sai@school.com\n';
-            const mappingsCsv = 'Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week\nT001,Indira,Grade-I-A,Maths,5\nT002,Sai Priya,Grade-I-A,EVS,4\n';
+            const mappingsCsv = 'Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week\nT001,Indira,IA,Maths,5\nT002,Sai Priya,IA,EVS,4\n';
             const blob = new Blob([`Teacher List Template\n${teachersCsv}\n\nMapping Template\n${mappingsCsv}`], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1576,7 +1576,11 @@ Return CSV now.`;
         }
         
         function normalizeClassSectionLabel(value) {
-            return toCleanString(value);
+            if (!value) return '';
+            let val = toCleanString(value);
+            val = val.replace(/^(grade|class)[-\s]*/i, '');
+            val = val.replace(/[-\s]+/g, '');
+            return val;
         }
         
         function getStandardDayOrder() {
@@ -1780,9 +1784,11 @@ Return CSV now.`;
                 const cells = parseCSVLine(line);
                 if (cells.length < 2) continue;
                 
-                const classSection = cells[0];
+                const classSection = normalizeClassSectionLabel(cells[0]);
                 const day = cells[1];
                 
+                ensureGradeSectionExists(classSection);
+
                 // Create class data structure if not exists
                 if (!state.tempCSVData[classSection]) {
                     state.tempCSVData[classSection] = {
@@ -2352,12 +2358,21 @@ Return CSV now.`;
         
         // Update class filters
         function updateClassFilters() {
-            // Combine classes from loaded timetable data and generated classSections
+            // Combine classes from loaded timetable data, generated classSections, and teacherMappings
             const classSet = new Set();
             if (state.timetableData) Object.keys(state.timetableData).forEach(c => classSet.add(c));
             (state.classSections || []).forEach(c => {
                 if (!c) return;
-                classSet.add(c.className || (typeof c === 'string' ? c : `${c.class || ''}-${c.section || ''}`));
+                if (typeof c === 'string') {
+                    classSet.add(c);
+                } else {
+                    classSet.add((c.class || '') + (c.section || ''));
+                }
+            });
+            (state.teacherMappings || []).forEach(m => {
+                if (m && m.gradeSection) {
+                    classSet.add(m.gradeSection);
+                }
             });
             const classes = Array.from(classSet).sort((a, b) => safeLocaleCompare(a, b));
             
@@ -2435,27 +2450,34 @@ Return CSV now.`;
                 subjectFilter.selectedIndex = -1;
             }
         }
-        
+
+        function getTimetableDataForClass(className) {
+            if (state.timetableData && state.timetableData[className]) {
+                return state.timetableData[className];
+            }
+            // Return empty timetable data structure for this class
+            const days = getStandardDayOrder().map(dayName => {
+                const periods = [];
+                const numPeriods = state.config.periodsPerDay || 8;
+                for (let p = 1; p <= numPeriods; p++) {
+                    periods.push({
+                        period: p,
+                        subject: '',
+                        teacherName: '',
+                        teacherId: '',
+                        time: state.periodTimes[`P${p}`] || getDefaultPeriodTime(p),
+                        type: 'Regular',
+                        breakAfter: 0
+                    });
+                }
+                return { dayName, periods };
+            });
+            return { className, days };
+        }
+
         // Render timetable
         function renderTimetable() {
             const timetableDisplay = document.getElementById('timetableDisplay');
-            
-            if (!state.timetableData) {
-                timetableDisplay.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-calendar-alt"></i>
-                        <h3>No Timetable Loaded</h3>
-                        <p>Upload a timetable using the "Upload Timetable" tab to view it here.</p>
-                        <button class="btn btn-primary" id="goToUploadBtn">
-                            <i class="fas fa-file-upload"></i> Go to Upload
-                        </button>
-                    </div>
-                `;
-                document.getElementById('goToUploadBtn').addEventListener('click', function() {
-                    document.querySelector('.tab[data-target="upload-timetable-section"]').click();
-                });
-                return;
-            }
             
             // Get filter values
             const classFilters = getMultiSelectValues('classFilter');
@@ -2465,12 +2487,49 @@ Return CSV now.`;
             let html = '';
             
             if (state.currentView === 'class') {
-                // Show class-wise timetable
-                const classesToShow = classFilters.length > 0 ? classFilters : Object.keys(state.timetableData);
+                // Determine all classes that we can show
+                let classesToShow = classFilters.filter(Boolean);
+                if (classesToShow.length === 0) {
+                    const classSet = new Set();
+                    if (state.timetableData) Object.keys(state.timetableData).forEach(c => classSet.add(c));
+                    (state.classSections || []).forEach(c => {
+                        if (!c) return;
+                        if (typeof c === 'string') {
+                            classSet.add(c);
+                        } else {
+                            classSet.add((c.class || '') + (c.section || ''));
+                        }
+                    });
+                    (state.teacherMappings || []).forEach(m => {
+                        if (m && m.gradeSection) {
+                            classSet.add(m.gradeSection);
+                        }
+                    });
+                    classesToShow = Array.from(classSet).sort((a, b) => safeLocaleCompare(a, b));
+                }
+                
+                if (classesToShow.length === 0) {
+                    timetableDisplay.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-calendar-alt"></i>
+                            <h3>No Timetable Loaded</h3>
+                            <p>Upload a timetable using the "Upload Timetable" tab to view it here.</p>
+                            <button class="btn btn-primary" id="goToUploadBtn">
+                                <i class="fas fa-file-upload"></i> Go to Upload
+                            </button>
+                        </div>
+                    `;
+                    const uploadBtn = document.getElementById('goToUploadBtn');
+                    if (uploadBtn) {
+                        uploadBtn.addEventListener('click', function() {
+                            document.querySelector('.tab[data-target="upload-timetable-section"]').click();
+                        });
+                    }
+                    return;
+                }
                 
                 classesToShow.forEach(className => {
-                    const classData = state.timetableData[className];
-                    
+                    const classData = getTimetableDataForClass(className);
                     html += `<h3 style="margin: 20px 0 10px 15px;">${className}</h3>`;
                     html += generateTimetableHTML(classData);
                 });
@@ -2532,7 +2591,7 @@ Return CSV now.`;
                     const hasTeacher = toCleanString(period.teacherName) !== '';
                     
                     if (!hasSubject && !hasTeacher) {
-                        html += `<td class="break-cell">BREAK</td>`;
+                        html += `<td class="period-cell empty-cell" data-class="${classData.className}" data-day="${dayName}" data-period="${period.period}"></td>`;
                     } else if (isHoliday) {
                         html += `<td class="holiday-cell">HOLIDAY</td>`;
                     } else {
@@ -3157,7 +3216,7 @@ Return CSV now.`;
             const samplePeriods = ['T001:Indira:MATHS', 'T001:Indira:ENGLISH', 'T002:Sai Priya:EVS', 'T003:Uma Rani:Hindi', 'T004:Pravalika:Maths'];
             getStandardDayOrder().slice(0, 3).forEach(day => {
                 const periodCells = periodHeaders.map((_, index) => samplePeriods[index] || '');
-                csv += `Grade-I-A,${day},${periodCells.join(',')}\n`;
+                csv += `IA,${day},${periodCells.join(',')}\n`;
             });
             
             // Create download link
@@ -3612,26 +3671,24 @@ Return CSV now.`;
             
             state.classSections = state.classSections || [];
             const exists = state.classSections.some(item => 
-                toCleanString(item.className).toLowerCase() === normalized.toLowerCase()
+                toCleanString(item.className).toLowerCase() === `class-${normalized}`.toLowerCase() ||
+                (item.class + item.section).toLowerCase() === normalized.toLowerCase()
             );
             
             if (!exists) {
-                const parts = normalized.split('-');
+                const match = normalized.match(/^([0-9]+|[IVXLCDMivxlcdm]+)?([A-Za-z]+)?$/);
                 let cls = '';
                 let sec = '';
-                if (parts.length >= 3) {
-                    cls = parts[1];
-                    sec = parts[2];
-                } else if (parts.length >= 2) {
-                    cls = parts[0];
-                    sec = parts[1];
+                if (match) {
+                    cls = match[1] || normalized;
+                    sec = match[2] || '';
                 } else {
                     cls = normalized;
-                    sec = 'A';
+                    sec = '';
                 }
                 
                 state.classSections.push({
-                    className: normalized,
+                    className: `Class-${cls}-${sec}`,
                     class: cls,
                     section: sec
                 });
@@ -3666,7 +3723,7 @@ Return CSV now.`;
         }
 
         function normalizeShortClassLabel(label) {
-            return toCleanString(label);
+            return normalizeClassSectionLabel(label);
         }
 
         function handleImportFormMappingsCSV(event) {
@@ -3730,6 +3787,8 @@ Return CSV now.`;
                             const classList = classesStr.split(/[;,\s]+/).map(c => toCleanString(c)).filter(Boolean);
                             classList.forEach((classLabel, idx) => {
                                 const normalizedGradeSection = normalizeShortClassLabel(classLabel);
+                                ensureGradeSectionExists(normalizedGradeSection);
+                                ensureSubjectExists(subject);
                                 
                                 imported.push({
                                     id: `M${Date.now()}-${i}-${idx}`,
@@ -3772,6 +3831,9 @@ Return CSV now.`;
                             if (!teacherName && !teacherId) { console.warn('Row ' + (i+1) + ': skipped — no teacher name or ID'); skippedRows++; continue; }
                             if (!gradeSection) { console.warn('Row ' + (i+1) + ': skipped — empty grade-section (raw: "' + rawGrade + '")'); skippedRows++; continue; }
                             if (!subject) { console.warn('Row ' + (i+1) + ': skipped — empty subject'); skippedRows++; continue; }
+
+                            ensureGradeSectionExists(gradeSection);
+                            ensureSubjectExists(subject);
 
                             const periods = parseInt(periodsVal) || 1;
 

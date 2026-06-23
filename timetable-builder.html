@@ -1548,14 +1548,7 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
       const FULL_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
       function sectionToMainAppClassName(sec) {
-        // sec is like "7" (single-section class) or "6A" (multi-section). The main app's own
-        // normalizeClassSectionLabel() expects a class+letter; bare numbers don't normalize as
-        // cleanly, so single-section classes get section "A" here.
-        const m = String(sec).match(/^(\d{1,2})([A-C]?)$/);
-        if (!m) return "Grade-" + sec;
-        const num = m[1];
-        const letter = m[2] || "A";
-        return "Grade-" + num + "-" + letter;
+        return String(sec || '').trim();
       }
 
       // per-period (not per-row) start times, skipping break rows, indexed by period number (0-based)
