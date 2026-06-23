@@ -673,6 +673,18 @@
                         // Get periods option values
                         const periodsList = [...new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, mapping.periodsPerWeek ? parseInt(mapping.periodsPerWeek) : null].filter(v => v !== null && !isNaN(v)))].sort((a,b)=>a-b);
 
+                        // Build grade-section options — always include the CSV value even if not in master list
+                        const gradeSectionLabels = classOptions.map(o => o.label);
+                        if (gradeValue && !gradeSectionLabels.includes(mapping.gradeSection)) {
+                            gradeSectionLabels.unshift(mapping.gradeSection);
+                        }
+
+                        // Build subject options — always include the CSV value even if not in master list
+                        const subjectList = [...subjectOptions];
+                        if (subjectValue && !subjectList.includes(mapping.subject)) {
+                            subjectList.unshift(mapping.subject);
+                        }
+
                         return `
                         <tr data-index="${index}">
                             <td><input value="${escapeHtml(mapping.teacherId)}" data-field="teacherId" readonly placeholder="Auto-generated"></td>
@@ -689,16 +701,16 @@
                             <td>
                                 <select data-field="gradeSection">
                                     <option value=""></option>
-                                    ${classOptions.map(option => `
-                                        <option value="${escapeHtml(option.label)}"${option.label === gradeValue ? ' selected' : ''}>${escapeHtml(option.label)}</option>
+                                    ${gradeSectionLabels.map(label => `
+                                        <option value="${escapeHtml(label)}"${label === mapping.gradeSection ? ' selected' : ''}>${escapeHtml(label)}</option>
                                     `).join('')}
                                 </select>
                             </td>
                             <td>
                                 <select data-field="subject">
                                     <option value=""></option>
-                                    ${subjectOptions.map(option => `
-                                        <option value="${escapeHtml(option)}"${option === subjectValue ? ' selected' : ''}>${escapeHtml(option)}</option>
+                                    ${subjectList.map(option => `
+                                        <option value="${escapeHtml(option)}"${option === mapping.subject ? ' selected' : ''}>${escapeHtml(option)}</option>
                                     `).join('')}
                                 </select>
                             </td>
@@ -3542,15 +3554,20 @@ Return CSV now.`;
             if (count) count.textContent = selected.length > 0 ? '(' + selected.length + ' selected)' : '';
         }
 
-        function buildCmsOptions(optionsContainerId, values, onChangeFn) {
+        function buildCmsOptions(optionsContainerId, values, onChangeFn, allocatedSet) {
             const cont = document.getElementById(optionsContainerId);
             if (!cont) return;
+            const allocated = allocatedSet instanceof Set ? allocatedSet : new Set();
             cont.innerHTML = values.map(function(v, i) {
                 const eid = 'cms_' + optionsContainerId + '_' + i;
                 const escaped = v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                return '<div class="cms-item" onclick="document.getElementById(\'' + eid + '\').click()">' +
+                const isAllocated = allocated.has(v);
+                const itemClass = 'cms-item' + (isAllocated ? ' cms-allocated' : '');
+                const badge = isAllocated ? '<span class="cms-allocated-badge">Allocated</span>' : '';
+                return '<div class="' + itemClass + '" onclick="document.getElementById(\'' + eid + '\').click()">' +
                     '<input type="checkbox" id="' + eid + '" value="' + escaped + '" onclick="event.stopPropagation()" onchange="' + onChangeFn + '">' +
                     '<label for="' + eid + '">' + escaped + '</label>' +
+                    badge +
                     '</div>';
             }).join('');
         }
@@ -3930,12 +3947,20 @@ Return CSV now.`;
 
             // Grade-Section custom checkbox list
             const gradeOptions = getClassSectionOptions();
-            buildCmsOptions('gradeSectionOptions', gradeOptions.map(function(o) { return o.label; }), "updateCmsDisplay('gradeSectionPanel')");
+            const allocatedGradeSections = new Set();
+            (state.teacherMappings || []).forEach(function(m) {
+                if (m.gradeSection) allocatedGradeSections.add(m.gradeSection);
+            });
+            buildCmsOptions('gradeSectionOptions', gradeOptions.map(function(o) { return o.label; }), "updateCmsDisplay('gradeSectionPanel')", allocatedGradeSections);
             updateCmsDisplay('gradeSectionPanel');
 
             // Subject custom checkbox list
             const subjectOptions = getSubjectOptions();
-            buildCmsOptions('subjectOptions', subjectOptions, "updateCmsDisplay('subjectPanel')");
+            const allocatedSubjects = new Set();
+            (state.teacherMappings || []).forEach(function(m) {
+                if (m.subject) allocatedSubjects.add(m.subject);
+            });
+            buildCmsOptions('subjectOptions', subjectOptions, "updateCmsDisplay('subjectPanel')", allocatedSubjects);
             updateCmsDisplay('subjectPanel');
 
             // Periods Per Week dropdown
