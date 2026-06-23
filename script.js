@@ -634,7 +634,7 @@
                         const rowSubjectOptions = [...baseSubjectOptions];
                         const found = rowSubjectOptions.find(o => o.code === subjectValue);
                         if (subjectValue && !found) {
-                            rowSubjectOptions.push({ code: subjectValue, name: `${subjectValue} (Unmapped)` });
+                            rowSubjectOptions.push({ code: subjectValue, name: subjectValue });
                         }
                         rowSubjectOptions.sort((a, b) => safeLocaleCompare(a.code, b.code));
                         
@@ -645,9 +645,10 @@
                             <td>
                                 <select data-field="classTeacherSubject">
                                     <option value=""></option>
-                                    ${rowSubjectOptions.map(option => `
-                                        <option value="${escapeHtml(option.code)}"${option.code === subjectValue ? ' selected' : ''}>${escapeHtml(option.code)} - ${escapeHtml(option.name)}</option>
-                                    `).join('')}
+                                    ${rowSubjectOptions.map(option => {
+                                        const label = option.code === option.name ? option.code : `${option.code} - ${option.name}`;
+                                        return `<option value="${escapeHtml(option.code)}"${option.code === subjectValue ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+                                    }).join('')}
                                 </select>
                             </td>
                             <td>
@@ -698,7 +699,7 @@
                         const rowSubjectOptions = [...baseSubjectOptions];
                         const found = rowSubjectOptions.find(o => o.code === subjectValue);
                         if (subjectValue && !found) {
-                            rowSubjectOptions.push({ code: subjectValue, name: `${subjectValue} (Unmapped)` });
+                            rowSubjectOptions.push({ code: subjectValue, name: subjectValue });
                         }
                         rowSubjectOptions.sort((a, b) => safeLocaleCompare(a.code, b.code));
                         return `
@@ -725,9 +726,10 @@
                             <td>
                                 <select data-field="subject">
                                     <option value=""></option>
-                                    ${rowSubjectOptions.map(option => `
-                                        <option value="${escapeHtml(option.code)}"${option.code === subjectValue ? ' selected' : ''}>${escapeHtml(option.code)} - ${escapeHtml(option.name)}</option>
-                                    `).join('')}
+                                    ${rowSubjectOptions.map(option => {
+                                        const label = option.code === option.name ? option.code : `${option.code} - ${option.name}`;
+                                        return `<option value="${escapeHtml(option.code)}"${option.code === subjectValue ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+                                    }).join('')}
                                 </select>
                             </td>
                             <td>
