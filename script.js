@@ -900,11 +900,16 @@
                 const left = parts[0] ? toCleanString(parts[0]) : '';
                 const right = parts[1] ? parts[1] : '';
                 if (!left) return;
-                const classPart = left.replace(/^Grade\s*/i, '').replace(/^Class\s*/i, '');
+                let classPart = left.replace(/^Grade\s*/i, '').replace(/^Class\s*/i, '');
+                if (/^[0-9]+$/.test(classPart)) {
+                    classPart = romanize(parseInt(classPart, 10));
+                } else {
+                    classPart = classPart.toUpperCase();
+                }
                 const sections = right ? right.split(',').map(s => toCleanString(s)).filter(Boolean) : ['A'];
                 sections.forEach(sec => {
                     const cls = classPart;
-                    const s = sec;
+                    const s = sec.toUpperCase();
                     const className = `Class-${cls}-${s}`;
                     out.push({ className, class: cls, section: s });
                 });
@@ -1087,8 +1092,13 @@
                             // try formats like 10-A or 10:A or Class-10-A
                             const parts = cell.split(/[-:]/).filter(Boolean);
                             if (parts.length >= 2) {
-                                const cls = parts[0].replace(/^class|^grade\s*/i, '').trim();
-                                const sec = parts[1].trim();
+                                let cls = parts[0].replace(/^class|^grade\s*/i, '').trim();
+                                if (/^[0-9]+$/.test(cls)) {
+                                    cls = romanize(parseInt(cls, 10));
+                                } else {
+                                    cls = cls.toUpperCase();
+                                }
+                                const sec = parts[1].trim().toUpperCase();
                                 parsed.push({ className: `Class-${cls}-${sec}`, class: cls, section: sec });
                             }
                             continue;
@@ -1098,8 +1108,13 @@
                         const rawClass = toCleanString(cols[0]);
                         const rawSection = toCleanString(cols[1]);
                         if (!rawClass || !rawSection) continue;
-                        const cls = rawClass.replace(/^class|^grade\s*/i, '');
-                        const sec = rawSection;
+                        let cls = rawClass.replace(/^class|^grade\s*/i, '');
+                        if (/^[0-9]+$/.test(cls)) {
+                            cls = romanize(parseInt(cls, 10));
+                        } else {
+                            cls = cls.toUpperCase();
+                        }
+                        const sec = rawSection.toUpperCase();
                         parsed.push({ className: `Class-${cls}-${sec}`, class: cls, section: sec });
                     }
 
@@ -1580,7 +1595,16 @@ Return CSV now.`;
             let val = toCleanString(value);
             val = val.replace(/^(grade|class)[-\s]*/i, '');
             val = val.replace(/[-\s]+/g, '');
-            return val;
+            const match = val.match(/^([0-9]+|[IVXLCDMivxlcdm]+)?([A-Za-z])?$/);
+            if (!match) return val;
+            let gradePart = match[1] || '';
+            let sectionPart = match[2] || '';
+            if (/^[0-9]+$/.test(gradePart)) {
+                gradePart = romanize(parseInt(gradePart, 10));
+            } else {
+                gradePart = gradePart.toUpperCase();
+            }
+            return gradePart + sectionPart.toUpperCase();
         }
         
         function getStandardDayOrder() {

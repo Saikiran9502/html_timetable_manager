@@ -1547,8 +1547,37 @@ Hindi/Telugu,Sukrutha,9,5 periods`;
       const MAIN_APP_STORAGE_KEY = "schoolTimetable";
       const FULL_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+      function romanize(num) {
+        const lookup = {M:1000,CM:900,D:500,CD:400,C:100,XC:90,L:50,XL:40,X:10,IX:9,V:5,IV:4,I:1};
+        let roman = '';
+        for (let i in lookup) {
+          while (num >= lookup[i]) {
+            roman += i;
+            num -= lookup[i];
+          }
+        }
+        return roman;
+      }
+
+      function convertToRomanGrade(value) {
+        if (!value) return '';
+        let val = String(value).trim();
+        val = val.replace(/^(grade|class)[-\s]*/i, '');
+        val = val.replace(/[-\s]+/g, '');
+        const match = val.match(/^([0-9]+|[IVXLCDMivxlcdm]+)?([A-Za-z])?$/);
+        if (!match) return val;
+        let gradePart = match[1] || '';
+        let sectionPart = match[2] || '';
+        if (/^[0-9]+$/.test(gradePart)) {
+          gradePart = romanize(parseInt(gradePart, 10));
+        } else {
+          gradePart = gradePart.toUpperCase();
+        }
+        return gradePart + sectionPart.toUpperCase();
+      }
+
       function sectionToMainAppClassName(sec) {
-        return String(sec || '').trim();
+        return convertToRomanGrade(sec);
       }
 
       // per-period (not per-row) start times, skipping break rows, indexed by period number (0-based)
