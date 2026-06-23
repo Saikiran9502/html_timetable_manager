@@ -471,7 +471,7 @@
 
                     if (imported.length === 0) { alert('No valid teacher rows found in CSV.'); return; }
 
-                    state.teachers = mergeTeachers(state.teachers || [], imported);
+                    state.teachers = imported.sort((a, b) => safeLocaleCompare(a.name, b.name));
                     rebuildTeacherSubjectMapFromMasterData();
                     saveMasterDataToStorage();
                     saveTeacherSubjectMapToStorage();
@@ -541,9 +541,6 @@
                         if (!subj) { console.warn('Row ' + (ri+1) + ': skipped — no subject'); continue; }
                         if (!teacherId && !teacherName) { console.warn('Row ' + (ri+1) + ': skipped — no teacher'); continue; }
 
-                        if (gs) ensureGradeSectionExists(gs);
-                        if (subj) ensureSubjectExists(subj);
-
                         imported.push({
                             id: 'M' + Date.now() + '-' + ri,
                             teacherId: teacherId,
@@ -556,7 +553,7 @@
 
                     if (imported.length === 0) { alert('No valid mapping rows found in CSV.'); return; }
 
-                    state.teacherMappings = mergeTeacherMappings(state.teacherMappings || [], imported);
+                    state.teacherMappings = imported;
                     ensureMappingIdsGenerated();
                     rebuildTeacherSubjectMapFromMasterData();
                     saveMasterDataToStorage();
@@ -722,26 +719,15 @@
 
         function getClassSectionOptions() {
             const sections = state.classSections || [];
-            if (sections.length > 0) {
-                return sections
-                    .map(function(item) {
-                        const cls = item.class || '';
-                        const sec = item.section || '';
-                        const label = cls + '-' + sec;
-                        return { label: label, value: label };
-                    })
-                    .filter(function(o) { return o.label !== '-'; })
-                    .sort(function(a, b) { return safeLocaleCompare(a.label, b.label); });
-            }
-            // Fallback: Grade 1–12 × sections A, B, C
-            var defaults = [];
-            for (var g = 1; g <= 12; g++) {
-                ['A', 'B', 'C'].forEach(function(sec) {
-                    var label = 'Grade-' + g + '-' + sec;
-                    defaults.push({ label: label, value: label });
-                });
-            }
-            return defaults;
+            return sections
+                .map(function(item) {
+                    const cls = item.class || '';
+                    const sec = item.section || '';
+                    const label = cls + '-' + sec;
+                    return { label: label, value: label };
+                })
+                .filter(function(o) { return o.label !== '-'; })
+                .sort(function(a, b) { return safeLocaleCompare(a.label, b.label); });
         }
 
         function syncTeacherGradeSection(select) {
@@ -948,15 +934,7 @@
 
         function getSubjectOptions() {
             const subjs = state.subjects || [];
-            if (subjs.length > 0) {
-                return subjs.slice().sort(function(a, b) { return safeLocaleCompare(a, b); });
-            }
-            // Fallback: common school subjects
-            return [
-                'Art', 'Biology', 'Chemistry', 'Computer Science', 'Economics',
-                'English', 'Geography', 'Hindi', 'History', 'Mathematics',
-                'Music', 'Physical Education', 'Physics', 'Science', 'Social Studies'
-            ];
+            return subjs.slice().sort(function(a, b) { return safeLocaleCompare(a, b); });
         }
 
         function generateSubjectsFromInput() {
@@ -1018,9 +996,7 @@
                         alert('No valid subject rows found in CSV.');
                         return;
                     }
-                    const uniques = new Set((state.subjects || []).map(s => toCleanString(s)));
-                    parsed.forEach(subject => uniques.add(subject));
-                    state.subjects = Array.from(uniques).sort((a, b) => safeLocaleCompare(a, b));
+                    state.subjects = Array.from(new Set(parsed)).sort((a, b) => safeLocaleCompare(a, b));
                     saveMasterDataToStorage();
                     renderSubjectsTable();
                     alert('Imported ' + parsed.length + ' subject rows.');
@@ -1117,12 +1093,8 @@
                         return;
                     }
 
-                    // merge with existing
-                    const existing = (state.classSections || []).filter(Boolean);
-                    const mergedMap = new Map();
-                    existing.forEach(e => { if (e && e.className) mergedMap.set(e.className, e); });
-                    parsed.forEach(p => { if (p && p.className) mergedMap.set(p.className, p); });
-                    state.classSections = Array.from(mergedMap.values()).sort((a,b)=>safeLocaleCompare(a.className, b.className));
+                    // Overwrite with imported
+                    state.classSections = parsed.sort((a,b)=>safeLocaleCompare(a.className, b.className));
                     saveMasterDataToStorage();
                     renderClassSectionsTable();
                     updateClassFilters();
@@ -1959,23 +1931,8 @@ Return CSV now.`;
         }
         
         function autoFillMissingSubjectsFromTeacherMap() {
-            if (!state.timetableData || !state.teacherSubjectMap) return 0;
-            
-            let updatedCount = 0;
-            Object.values(state.timetableData).forEach(classData => {
-                (classData.days || []).forEach(day => {
-                    (day.periods || []).forEach(period => {
-                        const hasSubject = toCleanString(period.subject) !== '';
-                        if (hasSubject) return;
-                        const mappedSubject = getMappedSubjectForPeriod(period);
-                        if (!mappedSubject) return;
-                        period.subject = mappedSubject;
-                        updatedCount += 1;
-                    });
-                });
-            });
-            
-            return updatedCount;
+            // Disabled: only use uploaded CSV data, do not auto-fill/guess subjects
+            return 0;
         }
         
         function processSubjectMappingCSV(csvData, fileName) {
@@ -2020,10 +1977,7 @@ Return CSV now.`;
                 return;
             }
             
-            state.teacherSubjectMap = {
-                ...(state.teacherSubjectMap || {}),
-                ...parsedMap
-            };
+            state.teacherSubjectMap = parsedMap;
             saveTeacherSubjectMapToStorage();
             
             const updatedPeriods = autoFillMissingSubjectsFromTeacherMap();
@@ -3811,9 +3765,6 @@ Return CSV now.`;
                                     subject: subject,
                                     periodsPerWeek: String(periods)
                                 });
-                                
-                                ensureGradeSectionExists(normalizedGradeSection);
-                                ensureSubjectExists(subject);
                             });
                         }
                     } else {
@@ -3858,9 +3809,6 @@ Return CSV now.`;
                                 subject: subject,
                                 periodsPerWeek: String(periods)
                             });
-
-                            ensureGradeSectionExists(gradeSection);
-                            ensureSubjectExists(subject);
                         }
 
                         if (skippedRows > 0) {
@@ -3873,8 +3821,8 @@ Return CSV now.`;
                         return;
                     }
                     
-                    // Merge with existing mappings
-                    state.teacherMappings = mergeTeacherMappings(state.teacherMappings || [], imported);
+                    // Overwrite with imported mappings
+                    state.teacherMappings = imported;
                     
                     // Enforce correct auto-generated IDs with collision resolution
                     ensureMappingIdsGenerated();
@@ -3939,6 +3887,7 @@ Return CSV now.`;
                 
                 alert("Success: All mappings cleared!");
             }
+        }
 
         function ensureMappingIdsGenerated() {
             const tempMappings = [];
@@ -4073,6 +4022,4 @@ Return CSV now.`;
             }
 
             alert('Mapping saved! Added ' + addedCount + ', updated ' + updatedCount + ' record(s).');
-        }
-
         }
