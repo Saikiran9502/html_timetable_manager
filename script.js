@@ -1751,10 +1751,10 @@ Return CSV now.`;
                 return { valid: false, error: 'Class-Section is empty' };
             }
             const normalized = normalizeClassSectionLabel(cleaned);
-            // Format validation: Grade-Class-Section (e.g., Grade-I-A or Grade-10-A)
-            const match = normalized.match(/^Grade-([IVX\d]+)-([A-Z])$/i);
+            // Format validation: Class-Section (e.g., IA or 10A)
+            const match = normalized.match(/^([IVXLCDM\d]+)([A-Z])$/i);
             if (!match) {
-                return { valid: false, error: `Invalid Class-Section format: "${value}". Expected format like "Grade-I-A"` };
+                return { valid: false, error: `Invalid Class-Section format: "${value}". Expected format like "IA"` };
             }
             return { valid: true, normalized };
         }
