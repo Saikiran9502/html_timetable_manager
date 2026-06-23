@@ -85,6 +85,7 @@
 
             if (storedTeacherMappings) {
                 state.teacherMappings = JSON.parse(storedTeacherMappings);
+                ensureMappingIdsGenerated();
             }
 
             const storedSubjects = localStorage.getItem('subjects');
@@ -184,6 +185,11 @@
                     // Add active class to clicked tab and corresponding section
                     this.classList.add('active');
                     document.getElementById(targetId).classList.add('active');
+                    
+                    if (targetId === 'mapping-form-section') {
+                        renderMappingFormDropdowns();
+                        renderFormMappingTable();
+                    }
                 });
             });
         }
@@ -200,6 +206,8 @@
             const exportBtn = document.getElementById('exportTeachersBtn');
             if (exportBtn) exportBtn.addEventListener('click', exportTeacherList);
             document.getElementById('teacherMappingFileInput').addEventListener('change', handleTeacherMappingUpload);
+            const exportMappingBtn = document.getElementById('exportMappingBtn');
+            if (exportMappingBtn) exportMappingBtn.addEventListener('click', exportFormMappingsCSV);
             document.getElementById('addTeacherRowBtn').addEventListener('click', addTeacherRow);
             document.getElementById('addMappingRowBtn').addEventListener('click', addMappingRow);
             const genClassesBtn = document.getElementById('generateClassSectionsBtn');
@@ -313,6 +321,43 @@
             document.getElementById('closeRescheduleModal').addEventListener('click', closeRescheduleModal);
             document.getElementById('cancelRescheduleBtn').addEventListener('click', closeRescheduleModal);
             document.getElementById('confirmRescheduleBtn').addEventListener('click', confirmReschedule);
+            
+            // Mapping Form setup
+            const mappingFormTeacherName = document.getElementById('mappingFormTeacherName');
+            if (mappingFormTeacherName) {
+                mappingFormTeacherName.addEventListener('change', function() {
+                    const teacherName = this.value;
+                    const idInput = document.getElementById('mappingFormTeacherId');
+                    if (idInput) {
+                        idInput.value = generateTeacherId(teacherName);
+                    }
+                });
+            }
+            
+            const teacherMappingForm = document.getElementById('teacherMappingForm');
+            if (teacherMappingForm) {
+                teacherMappingForm.addEventListener('submit', handleFormMappingSubmit);
+            }
+            
+            const exportFormMappingsBtn = document.getElementById('exportFormMappingsBtn');
+            if (exportFormMappingsBtn) {
+                exportFormMappingsBtn.addEventListener('click', exportFormMappingsCSV);
+            }
+            
+            const importFormMappingsInput = document.getElementById('importFormMappingsInput');
+            if (importFormMappingsInput) {
+                importFormMappingsInput.addEventListener('change', handleImportFormMappingsCSV);
+            }
+            
+            const saveFormMappingsBtn = document.getElementById('saveFormMappingsBtn');
+            if (saveFormMappingsBtn) {
+                saveFormMappingsBtn.addEventListener('click', handleSaveFormMappings);
+            }
+            
+            const clearFormMappingsBtn = document.getElementById('clearFormMappingsBtn');
+            if (clearFormMappingsBtn) {
+                clearFormMappingsBtn.addEventListener('click', handleClearFormMappings);
+            }
         }
         
         // Initialize the UI
@@ -325,6 +370,10 @@
             updateSetupSummary();
             renderAIPrompt();
             renderHolidays();
+            
+            // Render Mapping Form Components
+            renderMappingFormDropdowns();
+            renderFormMappingTable();
             
             // If timetable data exists, show it
             if (state.timetableData) {
@@ -473,6 +522,7 @@
                     .filter(row => row.gradeSection && row.subject && (row.teacherId || row.teacherName));
 
                 state.teacherMappings = mergeTeacherMappings(state.teacherMappings || [], imported);
+                ensureMappingIdsGenerated();
                 rebuildTeacherSubjectMapFromMasterData();
                 saveMasterDataToStorage();
                 saveTeacherSubjectMapToStorage();
@@ -520,6 +570,7 @@
             const table = document.getElementById('teacherMasterTable');
             const rows = state.teachers || [];
             const classSectionOptions = getClassSectionOptions();
+            const subjectOptions = getSubjectOptions();
             table.innerHTML = `
                 <thead>
                     <tr><th>Teacher ID</th><th>Teacher Name</th><th>Class Teacher Subject</th><th>Class Teacher Grade/Section</th><th>Phone</th><th>Email</th><th>Action</th></tr>
@@ -531,9 +582,16 @@
                             : '';
                         return `
                         <tr data-index="${index}">
-                            <td><input value="${escapeHtml(teacher.id)}" data-field="id"></td>
-                            <td><input value="${escapeHtml(teacher.name)}" data-field="name"></td>
-                            <td><input value="${escapeHtml(teacher.classTeacherSubject || teacher.subjects || '')}" data-field="classTeacherSubject"></td>
+                            <td><input value="${escapeHtml(teacher.id)}" data-field="id" readonly placeholder="Auto-generated"></td>
+                            <td><input value="${escapeHtml(teacher.name)}" data-field="name" oninput="syncTeacherIdFromNameInput(this)"></td>
+                            <td>
+                                <select data-field="classTeacherSubject">
+                                    <option value=""></option>
+                                    ${subjectOptions.map(option => `
+                                        <option value="${escapeHtml(option)}"${option === (teacher.classTeacherSubject || teacher.subjects || '') ? ' selected' : ''}>${escapeHtml(option)}</option>
+                                    `).join('')}
+                                </select>
+                            </td>
                             <td>
                                 <select data-field="classTeacherGrade" onchange="syncTeacherGradeSection(this)">
                                     <option value=""></option>
@@ -565,10 +623,26 @@
                     ${rows.map((mapping, index) => {
                         const gradeValue = mapping.gradeSection ? escapeHtml(mapping.gradeSection) : '';
                         const subjectValue = mapping.subject ? escapeHtml(mapping.subject) : '';
+                        
+                        // Get unique teacher names list ensuring current mapping teacher name is included
+                        const teacherNames = [...new Set((state.teachers || []).map(t => t.name).concat(mapping.teacherName ? [mapping.teacherName] : []).filter(Boolean))];
+                        
+                        // Get periods option values
+                        const periodsList = [...new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, mapping.periodsPerWeek ? parseInt(mapping.periodsPerWeek) : null].filter(v => v !== null && !isNaN(v)))].sort((a,b)=>a-b);
+
                         return `
                         <tr data-index="${index}">
-                            <td><input value="${escapeHtml(mapping.teacherId)}" data-field="teacherId"></td>
-                            <td><input value="${escapeHtml(mapping.teacherName)}" data-field="teacherName"></td>
+                            <td><input value="${escapeHtml(mapping.teacherId)}" data-field="teacherId" readonly placeholder="Auto-generated"></td>
+                            <td>
+                                <select data-field="teacherName" onchange="syncSetupMappingTeacherId(this)">
+                                    <option value=""></option>
+                                    ${teacherNames.map(name => {
+                                        const teacher = (state.teachers || []).find(t => t.name === name);
+                                        const id = teacher ? teacher.id : '';
+                                        return `<option value="${escapeHtml(name)}"${name === mapping.teacherName ? ' selected' : ''} data-id="${escapeHtml(id)}">${escapeHtml(name)}</option>`;
+                                    }).join('')}
+                                </select>
+                            </td>
                             <td>
                                 <select data-field="gradeSection">
                                     <option value=""></option>
@@ -585,7 +659,14 @@
                                     `).join('')}
                                 </select>
                             </td>
-                            <td><input type="number" min="0" value="${escapeHtml(mapping.periodsPerWeek)}" data-field="periodsPerWeek"></td>
+                            <td>
+                                <select data-field="periodsPerWeek">
+                                    <option value=""></option>
+                                    ${periodsList.map(val => `
+                                        <option value="${val}"${String(val) === String(mapping.periodsPerWeek) ? ' selected' : ''}>${val}</option>
+                                    `).join('')}
+                                </select>
+                            </td>
                             <td><button class="btn btn-danger btn-sm" onclick="deleteMappingRow(${index})"><i class="fas fa-trash"></i></button></td>
                         </tr>
                     `}).join('')}
@@ -595,14 +676,26 @@
 
         function getClassSectionOptions() {
             const sections = state.classSections || [];
-            const options = sections.map(item => {
-                const classValue = item.class || '';
-                const sectionValue = item.section || '';
-                const label = `${classValue}-${sectionValue}`;
-                const value = `${classValue}|${sectionValue}`;
-                return { label, value };
-            });
-            return options.sort((a, b) => safeLocaleCompare(a.label, b.label));
+            if (sections.length > 0) {
+                return sections
+                    .map(function(item) {
+                        const cls = item.class || '';
+                        const sec = item.section || '';
+                        const label = cls + '-' + sec;
+                        return { label: label, value: label };
+                    })
+                    .filter(function(o) { return o.label !== '-'; })
+                    .sort(function(a, b) { return safeLocaleCompare(a.label, b.label); });
+            }
+            // Fallback: Grade 1–12 × sections A, B, C
+            var defaults = [];
+            for (var g = 1; g <= 12; g++) {
+                ['A', 'B', 'C'].forEach(function(sec) {
+                    var label = 'Grade-' + g + '-' + sec;
+                    defaults.push({ label: label, value: label });
+                });
+            }
+            return defaults;
         }
 
         function syncTeacherGradeSection(select) {
@@ -618,6 +711,49 @@
             const [gradePart, sectionPart] = selected.split('|');
             hiddenSection.value = sectionPart || '';
             select.value = `${gradePart}|${hiddenSection.value}`;
+        }
+
+        function syncSetupMappingTeacherId(select) {
+            const row = select.closest('tr');
+            if (!row) return;
+            const idInput = row.querySelector('input[data-field="teacherId"]');
+            if (!idInput) return;
+            const teacherName = select.value;
+            
+            // Gather other IDs in the table currently to resolve collision
+            const otherIds = [];
+            const rows = Array.from(document.querySelectorAll('#teacherMappingTable tbody tr'));
+            rows.forEach(r => {
+                if (r !== row) {
+                    const nameSelect = r.querySelector('select[data-field="teacherName"]');
+                    const idValInput = r.querySelector('input[data-field="teacherId"]');
+                    if (nameSelect && nameSelect.value && nameSelect.value.toLowerCase() !== teacherName.toLowerCase() && idValInput && idValInput.value) {
+                        otherIds.push(idValInput.value.toUpperCase());
+                    }
+                }
+            });
+            
+            idInput.value = generateTeacherId(teacherName, otherIds);
+        }
+
+        function syncTeacherIdFromNameInput(inputElement) {
+            const row = inputElement.closest('tr');
+            if (!row) return;
+            const idInput = row.querySelector('input[data-field="id"]');
+            if (!idInput) return;
+            
+            const teacherName = inputElement.value;
+            const otherIds = [];
+            const rows = Array.from(document.querySelectorAll('#teacherMasterTable tbody tr'));
+            rows.forEach(r => {
+                if (r !== row) {
+                    const idValInput = r.querySelector('input[data-field="id"]');
+                    if (idValInput && idValInput.value) {
+                        otherIds.push(idValInput.value.toUpperCase());
+                    }
+                }
+            });
+            idInput.value = generateTeacherId(teacherName, otherIds);
         }
 
         function readTableRows(tableId, fields) {
@@ -655,6 +791,7 @@
                 }))
                 .filter(mapping => mapping.gradeSection && mapping.subject && (mapping.teacherId || mapping.teacherName));
 
+            ensureMappingIdsGenerated();
             rebuildTeacherSubjectMapFromMasterData();
             saveMasterDataToStorage();
             saveTeacherSubjectMapToStorage();
@@ -665,6 +802,8 @@
             updateSetupSummary();
             updateClassFilters();
             renderAIPrompt();
+            renderMappingFormDropdowns();
+            renderFormMappingTable();
             alert("Local setup data saved.");
         }
 
@@ -762,7 +901,16 @@
         }
 
         function getSubjectOptions() {
-            return (state.subjects || []).slice().sort((a, b) => safeLocaleCompare(a, b));
+            const subjs = state.subjects || [];
+            if (subjs.length > 0) {
+                return subjs.slice().sort(function(a, b) { return safeLocaleCompare(a, b); });
+            }
+            // Fallback: common school subjects
+            return [
+                'Art', 'Biology', 'Chemistry', 'Computer Science', 'Economics',
+                'English', 'Geography', 'Hindi', 'History', 'Mathematics',
+                'Music', 'Physical Education', 'Physics', 'Science', 'Social Studies'
+            ];
         }
 
         function generateSubjectsFromInput() {
@@ -3231,3 +3379,576 @@ Return CSV now.`;
         document.getElementById('cancelSwapBtn').addEventListener('click', function() {
             toggleRescheduleMode();
         });
+
+        // --- Mapping Form functions ---
+        function generateTeacherId(teacherName, existingIdsInList = null) {
+            if (!teacherName) return '';
+            
+            // Normalize teacher name: strip non-alphanumeric, uppercase
+            const cleaned = teacherName.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+            let baseId = cleaned.substring(0, 3);
+            if (baseId.length < 3) {
+                baseId = baseId.padEnd(3, 'X');
+            }
+            
+            // Get other teacher IDs currently in use
+            const otherIds = existingIdsInList !== null ? existingIdsInList : [];
+            if (existingIdsInList === null) {
+                // Collect from current mappings for other teachers
+                (state.teacherMappings || []).forEach(m => {
+                    if (toCleanString(m.teacherName).toLowerCase() !== teacherName.toLowerCase() && m.teacherId) {
+                        otherIds.push(m.teacherId.toUpperCase());
+                    }
+                });
+                // Collect from master list for other teachers
+                (state.teachers || []).forEach(t => {
+                    if (toCleanString(t.name).toLowerCase() !== teacherName.toLowerCase() && t.id) {
+                        otherIds.push(t.id.toUpperCase());
+                    }
+                });
+            }
+            
+            let finalId = baseId;
+            let counter = 1;
+            while (otherIds.includes(finalId)) {
+                finalId = baseId + counter;
+                counter++;
+            }
+            return finalId;
+        }
+
+        // --- CMS (Custom Multi-Select) utility functions ---
+
+        function toggleCmsDropdown(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const isOpen = container.classList.contains('open');
+            document.querySelectorAll('.custom-multiselect.open').forEach(el => el.classList.remove('open'));
+            if (!isOpen) container.classList.add('open');
+        }
+
+        function filterCmsOptions(panelId, query) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            const q = query.trim().toLowerCase();
+            panel.querySelectorAll('.cms-item').forEach(item => {
+                const text = (item.querySelector('label') || item).textContent.toLowerCase();
+                item.classList.toggle('hidden', q !== '' && !text.includes(q));
+            });
+        }
+
+        function selectAllCms(panelId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            panel.querySelectorAll('.cms-item:not(.hidden) input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+            updateCmsDisplay(panelId);
+        }
+
+        function clearAllCms(panelId, displayId, countId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            panel.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+            if (displayId) {
+                const disp = document.getElementById(displayId);
+                if (disp) {
+                    const key = panelId === 'gradeSectionPanel' ? 'Grade-Section(s)' : 'Subject(s)';
+                    disp.textContent = 'Select ' + key;
+                }
+            }
+            if (countId) { const c = document.getElementById(countId); if (c) c.textContent = ''; }
+        }
+
+        function getCmsSelectedValues(panelId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return [];
+            return Array.from(panel.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value).filter(Boolean);
+        }
+
+        function updateCmsDisplay(panelId) {
+            const selected = getCmsSelectedValues(panelId);
+            const isGrade = panelId === 'gradeSectionPanel';
+            const displayId = isGrade ? 'gradeSectionDisplay' : 'subjectDisplay';
+            const countId  = isGrade ? 'gradeSelCount'      : 'subjectSelCount';
+            const disp  = document.getElementById(displayId);
+            const count = document.getElementById(countId);
+            const placeholder = isGrade ? 'Select Grade-Section(s)' : 'Select Subject(s)';
+            if (disp) {
+                disp.textContent = selected.length === 0 ? placeholder
+                    : selected.length <= 2 ? selected.join(', ')
+                    : selected[0] + ', ' + selected[1] + ' +' + (selected.length - 2) + ' more';
+            }
+            if (count) count.textContent = selected.length > 0 ? '(' + selected.length + ' selected)' : '';
+        }
+
+        function buildCmsOptions(optionsContainerId, values, onChangeFn) {
+            const cont = document.getElementById(optionsContainerId);
+            if (!cont) return;
+            cont.innerHTML = values.map(function(v, i) {
+                const eid = 'cms_' + optionsContainerId + '_' + i;
+                const escaped = v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                return '<div class="cms-item" onclick="document.getElementById(\'' + eid + '\').click()">' +
+                    '<input type="checkbox" id="' + eid + '" value="' + escaped + '" onclick="event.stopPropagation()" onchange="' + onChangeFn + '">' +
+                    '<label for="' + eid + '">' + escaped + '</label>' +
+                    '</div>';
+            }).join('');
+        }
+
+        // Close CMS dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.custom-multiselect')) {
+                document.querySelectorAll('.custom-multiselect.open').forEach(el => el.classList.remove('open'));
+            }
+        });
+
+
+        function deleteFormMappingRow(index) {
+            if (confirm("Are you sure you want to delete this mapping record?")) {
+                state.teacherMappings.splice(index, 1);
+                rebuildTeacherSubjectMapFromMasterData();
+                saveMasterDataToStorage();
+                saveTeacherSubjectMapToStorage();
+                
+                // Sync everything
+                renderTeacherMappingTable();
+                updateSetupSummary();
+                renderAIPrompt();
+                
+                // Refresh local table
+                renderFormMappingTable();
+            }
+        }
+
+        function exportFormMappingsCSV() {
+            const csv = toMappingCSV(state.teacherMappings || []);
+            if (!csv || csv.trim() === 'Teacher ID,Teacher Name,Grade-Section,Subject,Periods Per Week') {
+                alert('No mappings to export.');
+                return;
+            }
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Teacher_Mapping_Export.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            // Success notification after export
+            alert("Success: Mappings exported successfully as Teacher_Mapping_Export.csv!");
+        }
+
+        function ensureGradeSectionExists(label) {
+            const normalized = normalizeClassSectionLabel(label);
+            if (!normalized) return;
+            
+            state.classSections = state.classSections || [];
+            const exists = state.classSections.some(item => 
+                toCleanString(item.className).toLowerCase() === normalized.toLowerCase()
+            );
+            
+            if (!exists) {
+                const parts = normalized.split('-');
+                let cls = '';
+                let sec = '';
+                if (parts.length >= 3) {
+                    cls = parts[1];
+                    sec = parts[2];
+                } else if (parts.length >= 2) {
+                    cls = parts[0];
+                    sec = parts[1];
+                } else {
+                    cls = normalized;
+                    sec = 'A';
+                }
+                
+                state.classSections.push({
+                    className: normalized,
+                    class: cls,
+                    section: sec
+                });
+            }
+        }
+
+        function ensureSubjectExists(subject) {
+            const cleanSubj = toCleanString(subject);
+            if (!cleanSubj) return;
+            
+            state.subjects = state.subjects || [];
+            const exists = state.subjects.some(s => 
+                toCleanString(s).toLowerCase() === cleanSubj.toLowerCase()
+            );
+            
+            if (!exists) {
+                state.subjects.push(cleanSubj);
+                state.subjects.sort((a, b) => safeLocaleCompare(a, b));
+            }
+        }
+
+        function romanize(num) {
+            const lookup = {M:1000,CM:900,D:500,CD:400,C:100,XC:90,L:50,XL:40,X:10,IX:9,V:5,IV:4,I:1};
+            let roman = '';
+            for (let i in lookup) {
+                while (num >= lookup[i]) {
+                    roman += i;
+                    num -= lookup[i];
+                }
+            }
+            return roman;
+        }
+
+        function normalizeShortClassLabel(label) {
+            let clean = toCleanString(label).toUpperCase().replace(/\s+/g, '');
+            if (!clean) return '';
+            
+            if (clean.startsWith('GRADE-')) {
+                return normalizeClassSectionLabel(clean);
+            }
+            
+            const match = clean.match(/^(\d+)([A-Z])$/);
+            if (match) {
+                const classNum = parseInt(match[1]);
+                const section = match[2];
+                const roman = romanize(classNum);
+                return `Grade-${roman}-${section}`;
+            }
+            
+            const romanMatch = clean.match(/^([IVXLC]+)([A-Z])$/);
+            if (romanMatch) {
+                return `Grade-${romanMatch[1]}-${romanMatch[2]}`;
+            }
+            
+            // Handle raw single numbers or roman numerals by assuming section A
+            const singleNumMatch = clean.match(/^(\d+)$/);
+            if (singleNumMatch) {
+                const roman = romanize(parseInt(singleNumMatch[1]));
+                return `Grade-${roman}-A`;
+            }
+            
+            const singleRomanMatch = clean.match(/^([IVXLC]+)$/);
+            if (singleRomanMatch) {
+                return `Grade-${singleRomanMatch[1]}-A`;
+            }
+            
+            return normalizeClassSectionLabel(label);
+        }
+
+        function handleImportFormMappingsCSV(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const rows = parseCSVRows(e.target.result);
+                    if (!rows || rows.length === 0) {
+                        alert('Empty or invalid CSV file.');
+                        return;
+                    }
+                    
+                    const headers = rows[0].map(h => toCleanString(h).toLowerCase());
+                    
+                    // Format 1: Teacher ID, Teacher Name, Grade-Section, Subject, Periods Per Week
+                    const teacherIdIndex = findHeaderIndex(headers, ['teacher id', 'teacherid', 'id']);
+                    const teacherNameIndex = findHeaderIndex(headers, ['teacher name', 'teachername', 'name']);
+                    const gradeIndex = findHeaderIndex(headers, ['grade-section', 'class-section', 'class', 'grade section', 'grade/section']);
+                    const subjectIndex = findHeaderIndex(headers, ['subject']);
+                    const periodsIndex = findHeaderIndex(headers, ['periods per week', 'periodsperweek', 'periods', 'weekly periods', 'periods/week']);
+                    
+                    // Format 2: Subject, Teacher, Classes, Periods (e.g. sample-data/teacher-schedule.csv)
+                    const schedSubjectIndex = findHeaderIndex(headers, ['subject']);
+                    const schedTeacherIndex = findHeaderIndex(headers, ['teacher', 'teachername', 'name']);
+                    const schedClassesIndex = findHeaderIndex(headers, ['classes', 'class']);
+                    const schedPeriodsIndex = findHeaderIndex(headers, ['periods', 'periodsperweek']);
+
+                    let isScheduleFormat = false;
+                    if (schedSubjectIndex !== -1 && schedTeacherIndex !== -1 && schedClassesIndex !== -1 && schedPeriodsIndex !== -1 && teacherNameIndex === -1) {
+                        isScheduleFormat = true;
+                    }
+
+                    const imported = [];
+
+                    if (isScheduleFormat) {
+                        // Process schedule format (Subject, Teacher, Classes, Periods)
+                        for (let i = 1; i < rows.length; i++) {
+                            const cells = rows[i];
+                            if (cells.length < 3) continue;
+                            
+                            const subject = toCleanString(cells[schedSubjectIndex]);
+                            const teacherName = toCleanString(cells[schedTeacherIndex]);
+                            const classesStr = toCleanString(cells[schedClassesIndex]);
+                            const periodsVal = schedPeriodsIndex >= 0 ? toCleanString(cells[schedPeriodsIndex]) : '1';
+                            
+                            if (!teacherName || !subject || !classesStr) {
+                                alert(`Validation Error: Row ${i + 1} has missing fields in schedule format.`);
+                                return;
+                            }
+                            
+                            const periods = parseInt(periodsVal) || 1;
+                            if (periods <= 0) {
+                                alert(`Validation Error: Row ${i + 1} periods must be greater than 0.`);
+                                return;
+                            }
+
+                            // Split list of classes e.g. "1A;1B;2A;2B;3B"
+                            const classList = classesStr.split(/[;,\s]+/).map(c => toCleanString(c)).filter(Boolean);
+                            classList.forEach((classLabel, idx) => {
+                                const normalizedGradeSection = normalizeShortClassLabel(classLabel);
+                                
+                                imported.push({
+                                    id: `M${Date.now()}-${i}-${idx}`,
+                                    teacherId: '', // Will be generated
+                                    teacherName: teacherName,
+                                    gradeSection: normalizedGradeSection,
+                                    subject: subject,
+                                    periodsPerWeek: String(periods)
+                                });
+                                
+                                ensureGradeSectionExists(normalizedGradeSection);
+                                ensureSubjectExists(subject);
+                            });
+                        }
+                    } else {
+                        // Process standard mapping format
+                        if (teacherNameIndex === -1 || gradeIndex === -1 || subjectIndex === -1) {
+                            alert("CSV columns must include: Teacher Name, Grade-Section, and Subject (or Subject, Teacher, Classes, Periods).");
+                            return;
+                        }
+
+                        for (let i = 1; i < rows.length; i++) {
+                            const cells = rows[i];
+                            if (cells.length < 3) continue; // skip empty/short lines
+                            
+                            const teacherName = toCleanString(cells[teacherNameIndex]);
+                            const gradeSection = normalizeClassSectionLabel(cells[gradeIndex]);
+                            const subject = toCleanString(cells[subjectIndex]);
+                            const periodsVal = periodsIndex >= 0 ? toCleanString(cells[periodsIndex]) : '1';
+                            
+                            // Validation
+                            if (!teacherName) {
+                                alert(`Validation Error: Row ${i + 1} has an empty Teacher Name.`);
+                                return;
+                            }
+                            if (!gradeSection) {
+                                alert(`Validation Error: Row ${i + 1} has an empty Grade-Section.`);
+                                return;
+                            }
+                            if (!subject) {
+                                alert(`Validation Error: Row ${i + 1} has an empty Subject.`);
+                                return;
+                            }
+                            
+                            const periods = parseInt(periodsVal) || 1;
+                            if (periods <= 0) {
+                                alert(`Validation Error: Row ${i + 1} has periods per week of "${periodsVal}". It must be greater than 0.`);
+                                return;
+                            }
+                            
+                            imported.push({
+                                id: `M${Date.now()}-${i}`,
+                                teacherId: '', // Will be generated
+                                teacherName: teacherName,
+                                gradeSection: gradeSection,
+                                subject: subject,
+                                periodsPerWeek: String(periods)
+                            });
+                            
+                            // Automatically check/create grade-section and subject
+                            ensureGradeSectionExists(gradeSection);
+                            ensureSubjectExists(subject);
+                        }
+                    }
+                    
+                    if (imported.length === 0) {
+                        alert("No valid rows found in CSV.");
+                        return;
+                    }
+                    
+                    // Merge with existing mappings
+                    state.teacherMappings = mergeTeacherMappings(state.teacherMappings || [], imported);
+                    
+                    // Enforce correct auto-generated IDs with collision resolution
+                    ensureMappingIdsGenerated();
+                    
+                    // Save and rebuild references
+                    rebuildTeacherSubjectMapFromMasterData();
+                    saveMasterDataToStorage();
+                    saveTeacherSubjectMapToStorage();
+                    
+                    // Re-render UI components across application
+                    renderTeacherMappingTable();
+                    renderClassSectionsTable();
+                    renderSubjectsTable();
+                    updateClassFilters();
+                    updateSetupSummary();
+                    renderAIPrompt();
+                    
+                    renderMappingFormDropdowns();
+                    renderFormMappingTable();
+                    
+                    // Success notification
+                    alert(`Success: Mappings imported successfully! Added/Merged ${imported.length} mapping records.`);
+                } catch (err) {
+                    console.error(err);
+                    alert("Failed to parse CSV. Please make sure it is valid.");
+                } finally {
+                    event.target.value = ''; // reset input
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function handleSaveFormMappings() {
+            ensureMappingIdsGenerated();
+            rebuildTeacherSubjectMapFromMasterData();
+            saveMasterDataToStorage();
+            saveTeacherSubjectMapToStorage();
+            
+            // Sync everything
+            renderTeacherMappingTable();
+            updateSetupSummary();
+            renderAIPrompt();
+            renderFormMappingTable();
+            
+            alert("Success: Mappings saved successfully!");
+        }
+
+        function handleClearFormMappings() {
+            if (confirm("Are you sure you want to clear all mapping records? This action cannot be undone.")) {
+                state.teacherMappings = [];
+                rebuildTeacherSubjectMapFromMasterData();
+                saveMasterDataToStorage();
+                saveTeacherSubjectMapToStorage();
+                
+                // Sync everything
+                renderTeacherMappingTable();
+                updateSetupSummary();
+                renderAIPrompt();
+                
+                // Refresh local table
+                renderFormMappingTable();
+                
+                alert("Success: All mappings cleared!");
+            }
+
+        function ensureMappingIdsGenerated() {
+            const tempMappings = [];
+            (state.teacherMappings || []).forEach(function(m) {
+                const existing = tempMappings.find(function(x) {
+                    return (x.teacherName || '').toLowerCase() === (m.teacherName || '').toLowerCase();
+                });
+                if (existing) {
+                    tempMappings.push(Object.assign({}, m, { teacherId: existing.teacherId }));
+                } else {
+                    const otherIds = tempMappings.map(function(x) { return (x.teacherId || '').toUpperCase(); });
+                    tempMappings.push(Object.assign({}, m, { teacherId: generateTeacherId(m.teacherName, otherIds) }));
+                }
+            });
+            state.teacherMappings = tempMappings;
+        }
+
+        function renderMappingFormDropdowns() {
+            // Teacher Name dropdown
+            const nameSelect = document.getElementById('mappingFormTeacherName');
+            if (nameSelect) {
+                const teachers = state.teachers || [];
+                nameSelect.innerHTML = '<option value="">Select Teacher</option>';
+                teachers.forEach(function(t) {
+                    if (t.name) {
+                        nameSelect.innerHTML += '<option value="' + escapeHtml(t.name) + '">' + escapeHtml(t.name) + '</option>';
+                    }
+                });
+            }
+
+            // Grade-Section custom checkbox list
+            const gradeOptions = getClassSectionOptions();
+            buildCmsOptions('gradeSectionOptions', gradeOptions.map(function(o) { return o.label; }), "updateCmsDisplay('gradeSectionPanel')");
+            updateCmsDisplay('gradeSectionPanel');
+
+            // Subject custom checkbox list
+            const subjectOptions = getSubjectOptions();
+            buildCmsOptions('subjectOptions', subjectOptions, "updateCmsDisplay('subjectPanel')");
+            updateCmsDisplay('subjectPanel');
+
+            // Periods Per Week dropdown
+            const periodsSelect = document.getElementById('mappingFormPeriods');
+            if (periodsSelect) {
+                periodsSelect.innerHTML = '<option value="">Select Periods</option>';
+                for (let i = 1; i <= 12; i++) {
+                    periodsSelect.innerHTML += '<option value="' + i + '">' + i + '</option>';
+                }
+            }
+        }
+
+        function renderFormMappingTable() {
+            const tableBody = document.getElementById('savedFormMappingsBody');
+            if (!tableBody) return;
+            const rows = state.teacherMappings || [];
+            if (rows.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px;">No mapping records found. Use the form above to add a new mapping.</td></tr>';
+                return;
+            }
+            tableBody.innerHTML = rows.map(function(mapping, index) {
+                return '<tr>' +
+                    '<td>' + escapeHtml(mapping.teacherId || '') + '</td>' +
+                    '<td>' + escapeHtml(mapping.teacherName || '') + '</td>' +
+                    '<td>' + escapeHtml(mapping.gradeSection || '') + '</td>' +
+                    '<td>' + escapeHtml(mapping.subject || '') + '</td>' +
+                    '<td>' + escapeHtml(mapping.periodsPerWeek || '') + '</td>' +
+                    '<td><button class="btn btn-danger btn-sm" onclick="deleteFormMappingRow(' + index + ')"><i class="fas fa-trash"></i> Delete</button></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        function handleFormMappingSubmit(event) {
+            event.preventDefault();
+            const teacherName = document.getElementById('mappingFormTeacherName').value;
+            const gradeSections = getCmsSelectedValues('gradeSectionPanel');
+            const subjects = getCmsSelectedValues('subjectPanel');
+            const periodsPerWeek = document.getElementById('mappingFormPeriods').value;
+
+            if (!teacherName) { alert('Please select a Teacher Name.'); return; }
+            if (gradeSections.length === 0) { alert('Please select at least one Grade-Section.'); return; }
+            if (subjects.length === 0) { alert('Please select at least one Subject.'); return; }
+            if (!periodsPerWeek) { alert('Please select Periods Per Week.'); return; }
+
+            state.teacherMappings = state.teacherMappings || [];
+            let addedCount = 0, updatedCount = 0;
+
+            gradeSections.forEach(function(gradeSection) {
+                subjects.forEach(function(subject) {
+                    const existingIndex = state.teacherMappings.findIndex(function(m) {
+                        return (m.teacherName || '').toLowerCase() === teacherName.toLowerCase() &&
+                               (m.gradeSection || '').toLowerCase() === gradeSection.toLowerCase() &&
+                               (m.subject || '').toLowerCase() === subject.toLowerCase();
+                    });
+                    const newMapping = {
+                        id: existingIndex >= 0 ? state.teacherMappings[existingIndex].id : ('M' + Date.now() + '-' + Math.random().toString(36).substr(2, 5)),
+                        teacherId: existingIndex >= 0 ? state.teacherMappings[existingIndex].teacherId : generateTeacherId(teacherName),
+                        teacherName: teacherName,
+                        gradeSection: gradeSection,
+                        subject: subject,
+                        periodsPerWeek: periodsPerWeek
+                    };
+                    if (existingIndex >= 0) { state.teacherMappings[existingIndex] = newMapping; updatedCount++; }
+                    else { state.teacherMappings.push(newMapping); addedCount++; }
+                });
+            });
+
+            ensureMappingIdsGenerated();
+            rebuildTeacherSubjectMapFromMasterData();
+            saveMasterDataToStorage();
+            saveTeacherSubjectMapToStorage();
+            renderTeacherMappingTable();
+            updateSetupSummary();
+            renderAIPrompt();
+            renderFormMappingTable();
+
+            document.getElementById('teacherMappingForm').reset();
+            clearAllCms('gradeSectionPanel', 'gradeSectionDisplay', 'gradeSelCount');
+            clearAllCms('subjectPanel', 'subjectDisplay', 'subjectSelCount');
+
+            alert('Mapping saved! Added ' + addedCount + ', updated ' + updatedCount + ' record(s).');
+        }
+
+        }

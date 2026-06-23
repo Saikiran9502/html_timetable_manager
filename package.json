@@ -1,0 +1,11 @@
+{
+  "name": "html-timetable-manager",
+  "version": "1.0.0",
+  "description": "School Timetable Manager",
+  "scripts": {
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "vite": "^5.2.0"
+  }
+}

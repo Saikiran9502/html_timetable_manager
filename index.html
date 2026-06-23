@@ -45,6 +45,9 @@
             <div class="tab" data-target="teacher-schedule-section">
                 <i class="fas fa-chalkboard-teacher"></i> Teacher Schedule
             </div>
+            <div class="tab" data-target="mapping-form-section">
+                <i class="fas fa-link"></i> Mapping Form
+            </div>
         </div>
 
         <!-- Setup Section -->
@@ -109,6 +112,9 @@
                         <label class="btn btn-primary" for="teacherMappingFileInput">
                             <i class="fas fa-file-csv"></i> Import Mapping CSV
                         </label>
+                        <button class="btn btn-outline" id="exportMappingBtn">
+                            <i class="fas fa-file-download"></i> Export Mapping CSV
+                        </button>
                         <button class="btn btn-secondary" id="addMappingRowBtn">
                             <i class="fas fa-plus"></i> Add Mapping
                         </button>
@@ -492,6 +498,135 @@
                         <h3>No Teacher Schedule Loaded</h3>
                         <p>Select a teacher to view their schedule.</p>
                     </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Mapping Form Section -->
+        <div class="content-section" id="mapping-form-section">
+            <div class="section-header">
+                <h2><i class="fas fa-link"></i> Teacher Grade-Section Subject Mapping</h2>
+                <div class="section-actions">
+                    <input type="file" id="importFormMappingsInput" accept=".csv" style="display:none">
+                    <button class="btn btn-primary" onclick="document.getElementById('importFormMappingsInput').click()">
+                        <i class="fas fa-file-upload"></i> Import Mapping CSV
+                    </button>
+                    <button class="btn btn-success" id="exportFormMappingsBtn">
+                        <i class="fas fa-file-download"></i> Export Mapping CSV
+                    </button>
+                    <button class="btn btn-success" id="saveFormMappingsBtn">
+                        <i class="fas fa-save"></i> Save Mapping
+                    </button>
+                    <button class="btn btn-danger" id="clearFormMappingsBtn">
+                        <i class="fas fa-trash-alt"></i> Clear Mapping
+                    </button>
+                </div>
+            </div>
+
+            <div class="setup-grid">
+                <!-- Form panel -->
+                <div class="setup-panel">
+                    <h3><i class="fas fa-edit"></i> Create New Mapping</h3>
+                    <p>Enter mapping details below. All fields are required.</p>
+                    
+                    <form id="teacherMappingForm" onsubmit="event.preventDefault();">
+                        <div class="form-group">
+                            <label for="mappingFormTeacherName">Teacher Name</label>
+                            <select id="mappingFormTeacherName" class="form-control" required>
+                                <option value="">Select Teacher</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="mappingFormTeacherId">Teacher ID</label>
+                            <input type="text" id="mappingFormTeacherId" class="form-control" readonly placeholder="Auto-generated from Name">
+                        </div>
+
+                        <!-- Custom multi-select: Grade-Section -->
+                        <div class="form-group">
+                            <label>Grade &amp; Section <span id="gradeSelCount" style="font-weight:600;color:var(--primary-color);"></span></label>
+                            <div class="custom-multiselect" id="gradeSectionDropdown">
+                                <div class="cms-trigger" id="gradeSectionTrigger" onclick="toggleCmsDropdown('gradeSectionDropdown')">
+                                    <span id="gradeSectionDisplay">Select Grade-Section(s)</span>
+                                    <i class="fas fa-chevron-down cms-arrow" id="gradeSectionArrow"></i>
+                                </div>
+                                <div class="cms-panel" id="gradeSectionPanel">
+                                    <div class="cms-search-wrap">
+                                        <input class="cms-search" type="text" placeholder="Search grade..." oninput="filterCmsOptions('gradeSectionPanel', this.value)">
+                                    </div>
+                                    <div class="cms-actions">
+                                        <button type="button" onclick="selectAllCms('gradeSectionPanel')">Select All</button>
+                                        <button type="button" onclick="clearAllCms('gradeSectionPanel', 'gradeSectionDisplay', 'gradeSelCount')">Clear All</button>
+                                    </div>
+                                    <div class="cms-options" id="gradeSectionOptions"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Custom multi-select: Subject -->
+                        <div class="form-group">
+                            <label>Subject <span id="subjectSelCount" style="font-weight:600;color:var(--primary-color);"></span></label>
+                            <div class="custom-multiselect" id="subjectDropdown">
+                                <div class="cms-trigger" id="subjectTrigger" onclick="toggleCmsDropdown('subjectDropdown')">
+                                    <span id="subjectDisplay">Select Subject(s)</span>
+                                    <i class="fas fa-chevron-down cms-arrow" id="subjectArrow"></i>
+                                </div>
+                                <div class="cms-panel" id="subjectPanel">
+                                    <div class="cms-search-wrap">
+                                        <input class="cms-search" type="text" placeholder="Search subject..." oninput="filterCmsOptions('subjectPanel', this.value)">
+                                    </div>
+                                    <div class="cms-actions">
+                                        <button type="button" onclick="selectAllCms('subjectPanel')">Select All</button>
+                                        <button type="button" onclick="clearAllCms('subjectPanel', 'subjectDisplay', 'subjectSelCount')">Clear All</button>
+                                    </div>
+                                    <div class="cms-options" id="subjectOptions"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="mappingFormPeriods">Periods Per Week</label>
+                            <select id="mappingFormPeriods" class="form-control" required>
+                                <option value="">Select Periods</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="mappingFormSubmitBtn" style="width: 100%; justify-content: center;">
+                            <i class="fas fa-plus"></i> Submit Mapping
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Guidance card -->
+                <div class="setup-panel" style="background-color: #fcfdff; border-left: 4px solid var(--primary-color);">
+                    <h3><i class="fas fa-info-circle"></i> Instructions & Rules</h3>
+                    <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 12px; font-size: 0.95rem; color: #555;">
+                        <p><i class="fas fa-check-circle" style="color: var(--success-color); margin-right: 5px;"></i> Ensure you set up Teachers, Class Sections, and Subjects in the <strong>Setup</strong> tab first.</p>
+                        <p><i class="fas fa-check-circle" style="color: var(--success-color); margin-right: 5px;"></i> Selecting a Teacher Name will auto-populate the Teacher ID (if configured), but you can customize it manually.</p>
+                        <p><i class="fas fa-exclamation-triangle" style="color: var(--warning-color); margin-right: 5px;"></i> Each unique combination of Teacher ID + Grade-Section + Subject must not exceed max periods per teacher.</p>
+                        <p><i class="fas fa-sync" style="color: var(--primary-color); margin-right: 5px;"></i> Saving a mapping automatically updates the setup and recalculates the AI prompting parameters.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Saved records list -->
+            <div class="setup-panel" style="margin-top: 20px;">
+                <h3><i class="fas fa-list-alt"></i> Saved Mapping Records</h3>
+                <p>The table below shows all configured mappings. Submitting the form adds new records here.</p>
+                <div class="editable-table-wrap">
+                    <table class="editable-table" id="savedFormMappingsTable">
+                        <thead>
+                            <tr>
+                                <th>Teacher ID</th>
+                                <th>Teacher Name</th>
+                                <th>Grade-Section</th>
+                                <th>Subject</th>
+                                <th>Periods / Week</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="savedFormMappingsBody">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
